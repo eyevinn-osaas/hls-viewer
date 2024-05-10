@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <link rel="stylesheet" href="styles.css" />
+    <title>HLS Playlist Manifests Viewer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/styles/default.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/highlight.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+      $(document).ready(function () {
+        $("#fetch-form").on("submit", function (event) {
+          event.preventDefault();
+
+          const url = $("#url-input").val();
+
+          $.get("/fetch", { url }, function (response) {
+            const manifests = response.manifests;
+            console.log(response, 43);
+            $("#manifests-container").empty();
+            $("#tabs").empty();
+            let videoCount = 1;
+            let audioCount = 1;
+            let subCount = 1;
+            for (let i = 0; i < manifests.length; i++) {
+              const manifest = manifests[i];
+              const tabId = `tab-${i}`;
+
+              let manifestName = "";
+              if (manifest.type === "Master Manifest") {
+                manifestName = manifest.type;
+              } else if (manifest.type.includes("Media")) {
+                manifestName = `${manifest.type}[${videoCount}]`;
+                videoCount++;
+              } else if (manifest.type.includes("Audio")) {
+                manifestName = `${manifest.type}[${audioCount}]`;
+                audioCount++;
+              } else if (manifest.type.includes("Subtitle")) {
+                manifestName = `${manifest.type}[${subCount}]`;
+                subCount++;
+              } else {
+                manifestName = "Other M3U8";
+              }
+              const tabLink = $(`<li><a href="#${tabId}">${manifestName}</a></li>`);
+              const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
+
+              // Calculate and append the total duration
+              const totalDuration = calculateTotalDuration(manifest.content);
+              const segmentCount = calculateSegCount(manifest.content);
+              tabContent.append(`<p>Total Playlist Duration: ${totalDuration} seconds; Segment Count: ${segmentCount}</p>`);
+              // Append the manifest content
+              tabContent.append(`<pre><code>${manifest.content}</code></pre>`);
+
+              $("#tabs").append(tabLink);
+              $("#manifests-container").append(tabContent);
+            }
+
+            $(".tab:first").show();
+            $("pre code").each(function (i, block) {
+              hljs.highlightBlock(block);
+            });
+          });
+        });
+
+        $(document).on("click", "a", function (event) {
+          event.preventDefault();
+
+          const target = $(this).attr("href");
+          $(".tab").hide();
+          $(target).show();
+        });
+      });
+      function calculateTotalDuration(manifestContent) {
+        // Regular expression to match EXTINF tags and their durations
+        const extinfRegex = /#EXTINF:([0-9.]+),/g;
+        let match;
+        let totalDuration = 0;
+
+        // Iterate through the manifest content and sum up the durations
+        while ((match = extinfRegex.exec(manifestContent))) {
+          totalDuration += parseFloat(match[1]);
+        }
+
+        return totalDuration;
+      }
+      function calculateSegCount(manifestContent) {
+        // Regular expression to match EXTINF tags and their durations
+        const extinfRegex = /#EXTINF:([0-9.]+),/g;
+        let match;
+        let c = 0;
+
+        // Iterate through the manifest content and sum up the durations
+        while ((match = extinfRegex.exec(manifestContent))) {
+          c++;
+        }
+
+        return c;
+      }
+    </script>
+  </head>
+  <body>
+    <h1>HLS Playlist Manifests Viewer</h1>
+    <form id="fetch-form">
+      <label for="url-input">HLS Stream URL:</label>
+      <input type="text" id="url-input" placeholder="Enter HLS stream URL" required />
+      <button type="submit">Fetch</button>
+    </form>
+    <hr />
+    <ul id="tabs"></ul>
+    <div id="manifests-container"></div>
+    <div id="total-segment-durations"></div>
+    <!-- New section to display total segment durations -->
+    <!-- Add a button to scroll back to the top -->
+    <button onclick="topFunction()" id="scrollToTopBtn" title="Go to top">Back to Top</button>
+
+    <script>
+      // Function to scroll back to the top when the button is clicked
+      function topFunction() {
+        document.body.scrollTop = 0; // For Safari
+        document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
+      }
+    </script>
+  </body>
+</html>
