@@ -11,4 +11,6 @@ It is a helpful service for those times when you may want debug and to know what
 
 ## Getting started
 
-Run `npm start`
+To run locally, just run `npm start`. Then go to `http://localhost:<PORT>` and paste a hls stream url and voila! View the playlist manifests
+
+
