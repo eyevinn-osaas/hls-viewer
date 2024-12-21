@@ -10,55 +10,63 @@
       $(document).ready(function () {
         $("#fetch-form").on("submit", function (event) {
           event.preventDefault();
-
+          const loadingMessage = document.getElementById("loadingMessage");
+          loadingMessage.style.display = "block";
           const url = $("#url-input").val();
+          try {
+            $.get("/fetch", { url }, function (response) {
+              const manifests = response.manifests;
+              console.log(response, 43);
+              $("#manifests-container").empty();
+              $("#tabs").empty();
+              let videoCount = 1;
+              let audioCount = 1;
+              let subCount = 1;
+              for (let i = 0; i < manifests.length; i++) {
+                const manifest = manifests[i];
+                const tabId = `tab-${i}`;
 
-          $.get("/fetch", { url }, function (response) {
-            const manifests = response.manifests;
-            console.log(response, 43);
-            $("#manifests-container").empty();
-            $("#tabs").empty();
-            let videoCount = 1;
-            let audioCount = 1;
-            let subCount = 1;
-            for (let i = 0; i < manifests.length; i++) {
-              const manifest = manifests[i];
-              const tabId = `tab-${i}`;
+                let manifestName = "";
+                if (manifest.type === "Master Manifest") {
+                  manifestName = manifest.type;
+                } else if (manifest.type.includes("Media")) {
+                  manifestName = `${manifest.type}[${videoCount}]`;
+                  videoCount++;
+                } else if (manifest.type.includes("Audio")) {
+                  manifestName = `${manifest.type}[${audioCount}]`;
+                  audioCount++;
+                } else if (manifest.type.includes("Subtitle")) {
+                  manifestName = `${manifest.type}[${subCount}]`;
+                  subCount++;
+                } else {
+                  manifestName = "Other M3U8";
+                }
+                const tabLink = $(`<li><a href="#${tabId}">${manifestName}</a></li>`);
+                const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
 
-              let manifestName = "";
-              if (manifest.type === "Master Manifest") {
-                manifestName = manifest.type;
-              } else if (manifest.type.includes("Media")) {
-                manifestName = `${manifest.type}[${videoCount}]`;
-                videoCount++;
-              } else if (manifest.type.includes("Audio")) {
-                manifestName = `${manifest.type}[${audioCount}]`;
-                audioCount++;
-              } else if (manifest.type.includes("Subtitle")) {
-                manifestName = `${manifest.type}[${subCount}]`;
-                subCount++;
-              } else {
-                manifestName = "Other M3U8";
+                // Calculate and append the total duration
+                const totalDuration = calculateTotalDuration(manifest.content);
+                const segmentCount = calculateSegCount(manifest.content);
+                tabContent.append(
+                  `<p>Total Playlist Duration: ${totalDuration} seconds; Segment Count: ${segmentCount}</p>`
+                );
+                // Append the manifest content
+                tabContent.append(`<pre><code>${manifest.content}</code></pre>`);
+
+                $("#tabs").append(tabLink);
+                $("#manifests-container").append(tabContent);
               }
-              const tabLink = $(`<li><a href="#${tabId}">${manifestName}</a></li>`);
-              const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
 
-              // Calculate and append the total duration
-              const totalDuration = calculateTotalDuration(manifest.content);
-              const segmentCount = calculateSegCount(manifest.content);
-              tabContent.append(`<p>Total Playlist Duration: ${totalDuration} seconds; Segment Count: ${segmentCount}</p>`);
-              // Append the manifest content
-              tabContent.append(`<pre><code>${manifest.content}</code></pre>`);
-
-              $("#tabs").append(tabLink);
-              $("#manifests-container").append(tabContent);
-            }
-
-            $(".tab:first").show();
-            $("pre code").each(function (i, block) {
-              hljs.highlightBlock(block);
+              $(".tab:first").show();
+              $("pre code").each(function (i, block) {
+                hljs.highlightBlock(block);
+              });
             });
-          });
+          } catch (error) {
+            console.error(error);
+          } finally {
+
+          }
         });
 
         $(document).on("click", "a", function (event) {
@@ -92,7 +100,7 @@
         while ((match = extinfRegex.exec(manifestContent))) {
           c++;
         }
-
+        loadingMessage.style.display = "none";
         return c;
       }
     </script>
@@ -104,6 +112,7 @@
       <input type="text" id="url-input" placeholder="Enter HLS stream URL" required />
       <button type="submit">Fetch</button>
     </form>
+    <div id="loadingMessage" style="display: none">Loading...</div>
     <hr />
     <ul id="tabs"></ul>
     <div id="manifests-container"></div>
