@@ -1,132 +1,605 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <link rel="stylesheet" href="styles.css" />
-    <title>HLS Playlist Manifests Viewer</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/styles/default.min.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/highlight.min.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script>
-      $(document).ready(function () {
-        $("#fetch-form").on("submit", function (event) {
-          event.preventDefault();
-          const loadingMessage = document.getElementById("loadingMessage");
-          loadingMessage.style.display = "block";
-          const url = $("#url-input").val();
-          try {
-            $.get("/fetch", { url }, function (response) {
-              const manifests = response.manifests;
-              console.log(response, 43);
-              $("#manifests-container").empty();
-              $("#tabs").empty();
-              let videoCount = 1;
-              let audioCount = 1;
-              let subCount = 1;
-              for (let i = 0; i < manifests.length; i++) {
-                const manifest = manifests[i];
-                const tabId = `tab-${i}`;
 
-                let manifestName = "";
-                if (manifest.type === "Master Manifest") {
-                  manifestName = manifest.type;
-                } else if (manifest.type.includes("Media")) {
-                  manifestName = `${manifest.type}[${videoCount}]`;
-                  videoCount++;
-                } else if (manifest.type.includes("Audio")) {
-                  manifestName = `${manifest.type}[${audioCount}]`;
-                  audioCount++;
-                } else if (manifest.type.includes("Subtitle")) {
-                  manifestName = `${manifest.type}[${subCount}]`;
-                  subCount++;
-                } else {
-                  manifestName = "Other M3U8";
-                }
-                const tabLink = $(`<li><a href="#${tabId}">${manifestName}</a></li>`);
-                const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
+<head>
+  <link rel="stylesheet" href="styles.css" />
+  <title>HLS Playlist Manifests Viewer</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/styles/default.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/highlight.min.js"></script>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script>
+    const manifestHistory = [];
+    let MAX_HISTORY = 5; // Default value
+    let ALLOW_DUPLICATES = true; // Changed to true as default
+    let HIGHLIGHT_DIVERGENT = true; // Default value
+    let currentTabType = null;
+    let currentTabIndex = null;
 
-                // Calculate and append the total duration
-                const totalDuration = calculateTotalDuration(manifest.content);
-                const segmentCount = calculateSegCount(manifest.content);
-                tabContent.append(
-                  `<p>Total Playlist Duration: ${totalDuration} seconds; Segment Count: ${segmentCount}</p>`
-                );
-                // Append the manifest content
-                tabContent.append(`<pre><code>${manifest.content}</code></pre>`);
+    // Move these functions to the top of your script section, before $(document).ready()
+    function calculateSelectedDuration(selectedText) {
+      const extinfRegex = /#EXTINF:([0-9.]+),/g;
+      let match;
+      let totalDuration = 0;
+      let count = 0;
 
-                $("#tabs").append(tabLink);
-                $("#manifests-container").append(tabContent);
-              }
+      while ((match = extinfRegex.exec(selectedText)) !== null) {
+        totalDuration += parseFloat(match[1]);
+        count++;
+      }
 
-              $(".tab:first").show();
-              $("pre code").each(function (i, block) {
-                hljs.highlightBlock(block);
-              });
-            });
-          } catch (error) {
-            console.error(error);
-          } finally {
+      return { duration: totalDuration.toFixed(3), count };
+    }
 
+    function handleSelection(event) {
+      const selection = window.getSelection();
+      const selectedText = selection.toString();
+      
+      if (selectedText) {
+        const result = calculateSelectedDuration(selectedText);
+        if (result.duration > 0) {
+          // Create a tooltip if it doesn't exist
+          let tooltip = document.getElementById('selection-tooltip');
+          if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.id = 'selection-tooltip';
+            tooltip.className = 'selection-tooltip';
+            document.body.appendChild(tooltip);
           }
-        });
+          
+          tooltip.innerHTML = `Selected: ${result.count} segments<br>Duration: ${result.duration}s`;
+          tooltip.style.display = 'block';
+          tooltip.style.left = (event.pageX + 10) + 'px';
+          tooltip.style.top = (event.pageY + 10) + 'px';
+        }
+      }
+    }
 
+    $(document).ready(function () {
+      $("#fetch-form").on("submit", function (event) {
+        event.preventDefault();
+        const loadingMessage = document.getElementById("loadingMessage");
+        const errorMessage = $("#error-message");
+        
+        loadingMessage.style.display = "block";
+        errorMessage.hide(); // Hide any previous error
+        
+        try {
+          $.get("/fetch", { url: $("#url-input").val() })
+            .done(function (response) {
+              displayManifests(response.manifests, $("#url-input").val());
+              loadingMessage.style.display = "none";
+            })
+            .fail(function (jqXHR, textStatus, errorThrown) {
+              loadingMessage.style.display = "none";
+              let message = "Error fetching manifests: ";
+              if (jqXHR.status >= 500) {
+                message += `Server error occurred (${jqXHR.status})`;
+              } else if (jqXHR.status === 404) {
+                message += `Manifest not found (${jqXHR.status})`;
+              } else if (textStatus === "timeout") {
+                message += "Request timed out";
+              } else if (jqXHR.status) {
+                message += `${errorThrown || "Unknown error"} (${jqXHR.status})`;
+              } else {
+                message += errorThrown || "Unknown error occurred";
+              }
+              errorMessage.text(message).show();
+            });
+        } catch (error) {
+          loadingMessage.style.display = "none";
+          errorMessage.text("Error: " + error.message).show();
+        }
+      });
+
+      // Add function to display manifests
+      function displayManifests(manifests, url = '') {
+        // If URL is provided, store in history (if not already present)
+        if (url) {
+          const isDuplicate = manifestHistory.some(entry => entry.url === url);
+          
+          if (!isDuplicate || ALLOW_DUPLICATES) {
+            const historyEntry = {
+              url: url,
+              timestamp: new Date().toLocaleString(),
+              manifests: manifests
+            };
+            
+            manifestHistory.unshift(historyEntry);
+            while (manifestHistory.length > MAX_HISTORY) {
+              manifestHistory.pop();
+            }
+            
+            updateHistoryDropdown();
+          }
+        }
+
+        $("#manifests-container").empty();
+        $("#tabs").empty();
+        let videoCount = 1;
+        let audioCount = 1;
+        let subCount = 1;
+        for (let i = 0; i < manifests.length; i++) {
+          const manifest = manifests[i];
+          const tabId = `tab-${i}`;
+
+          let manifestName = "";
+          let tooltipText = "";
+          
+          if (manifest.type === "Master Manifest") {
+            manifestName = manifest.type;
+          } else if (manifest.type === "Media Manifest") {
+            manifestName = `${manifest.type}[${videoCount}]`;
+            if (manifest.bandwidth) {
+              tooltipText = `BW: ${manifest.bandwidth}`;
+            }
+            videoCount++;
+          } else if (manifest.type === "Audio Manifest") {
+            manifestName = `${manifest.type}[${audioCount}]`;
+            if (manifest.metadata) {
+              tooltipText = `${manifest.metadata.groupId};${manifest.metadata.language}`;
+            }
+            audioCount++;
+          } else if (manifest.type === "Subtitle Manifest") {
+            manifestName = `${manifest.type}[${subCount}]`;
+            if (manifest.metadata) {
+              tooltipText = `${manifest.metadata.groupId};${manifest.metadata.language}`;
+            }
+            subCount++;
+          } else {
+            manifestName = "Other M3U8";
+          }
+          const tabLink = $(`<li><a href="#${tabId}" ${tooltipText ? `title="${tooltipText}"` : ''}>${manifestName}</a></li>`);
+          const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
+
+          const formatDuration = (seconds) => {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = (seconds % 60).toFixed(2);
+
+            return [
+              h > 0 ? `${h}h` : '',
+              m > 0 ? `${m}m` : '',
+              s > 0 ? `${s}s` : ''
+            ].filter(Boolean).join('');
+          };
+
+          // Calculate and append the total duration
+          const totalDuration = calculateTotalDuration(manifest.content);
+          const segmentCount = calculateSegCount(manifest.content);
+          const breakCounts = calculateBreakCounts(manifest.content);
+          const sequenceInfo = getMediaSequenceInfo(manifest.content);
+
+          // First, collect all sequences from non-master manifests
+          const mediaSequences = [];
+          const discSequences = [];
+          for (const manifest of manifests) {
+            if (manifest.type !== "Master Manifest") {
+              const sequenceInfo = getMediaSequenceInfo(manifest.content);
+              if (sequenceInfo.mediaSequence !== null && !sequenceInfo.hasEndlist) {
+                mediaSequences.push(sequenceInfo.mediaSequence);
+              }
+              if (sequenceInfo.discSequence !== null) {
+                discSequences.push(sequenceInfo.discSequence);
+              }
+            }
+          }
+
+          // Then modify how we display metrics for each manifest type
+          if (manifest.type === "Master Manifest") {
+            // First determine the most common sequence numbers
+            const mostCommonMediaSeq = mediaSequences.length > 0 
+              ? mediaSequences.reduce((a, b) =>
+                  mediaSequences.filter(v => v === a).length >= mediaSequences.filter(v => v === b).length ? a : b
+                )
+              : null;
+
+            const mostCommonDiscSeq = discSequences.length > 0 
+              ? discSequences.reduce((a, b) =>
+                  discSequences.filter(v => v === a).length >= discSequences.filter(v => v === b).length ? a : b
+                )
+              : null;
+
+            const formattedMediaSeqs = mediaSequences.map(seq => 
+              HIGHLIGHT_DIVERGENT && seq !== mostCommonMediaSeq 
+                ? `<span class="divergent-sequence">${seq}</span>` 
+                : seq
+            );
+
+            const formattedDiscSeqs = discSequences.map(seq => 
+              HIGHLIGHT_DIVERGENT && seq !== mostCommonDiscSeq 
+                ? `<span class="divergent-sequence">${seq}</span>` 
+                : seq
+            );
+
+            const metricsHtml = `
+              <div class="metrics-container">
+                ${mediaSequences.length > 0 ? `
+                  <div class="metric-box">
+                    <h3>Media Sequences</h3>
+                    <div class="metric-value">${formattedMediaSeqs.join(', ')}</div>
+                  </div>
+                ` : ''}
+                ${discSequences.length > 0 ? `
+                  <div class="metric-box">
+                    <h3>Discontinuity Sequences</h3>
+                    <div class="metric-value">${formattedDiscSeqs.join(', ')}</div>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+            if (mediaSequences.length > 0 || discSequences.length > 0) {
+              tabContent.append(metricsHtml);
+            }
+          } else if (manifest.type !== "Master Manifest") {
+            const metricsHtml = `
+              <div class="metrics-container">
+                <div class="metric-box">
+                  <h3>Total Duration</h3>
+                  <div class="metric-value">
+                    ${formatDuration(totalDuration)} (${totalDuration} seconds)
+                  </div>
+                </div>
+                <div class="metric-box">
+                  <h3>Segment Count</h3>
+                  <div class="metric-value">${segmentCount}</div>
+                </div>
+                <div class="metric-box">
+                  <h3>Discontinuities</h3>
+                  <div class="metric-value">${breakCounts.discontinuityCount}</div>
+                </div>
+                <div class="metric-box">
+                  <h3>Cue-outs</h3>
+                  <div class="metric-value">${breakCounts.cueOutCount}</div>
+                </div>
+              </div>
+            `;
+            tabContent.append(metricsHtml);
+          }
+
+          // Append the manifest content
+          const lines = manifest.content.split('\n');
+          const lineNumbersHtml = lines.map((_, i) => `<span class="line-number">${i + 1}</span>`).join('');
+
+          const manifestContentHtml = `
+            <div class="line-numbers">
+              <div class="line-numbers-rows">
+                ${lineNumbersHtml}
+              </div>
+              <div class="line-numbers-content" onmouseup="handleSelection(event)">
+                <pre><code>${manifest.content}</code></pre>
+              </div>
+            </div>
+          `;
+
+          tabContent.append(manifestContentHtml);
+
+          $("#tabs").append(tabLink);
+          $("#manifests-container").append(tabContent);
+        }
+
+        $(".tab:first").show();
+        $("pre code").each(function (i, block) {
+          hljs.highlightBlock(block);
+        });
+        loadingMessage.style.display = "none";
+
+        // Update the click handler for tabs
         $(document).on("click", "a", function (event) {
           event.preventDefault();
-
           const target = $(this).attr("href");
+          
+          // Store current tab info
+          const tabText = $(this).text();
+          if (tabText.includes('[')) {
+            const type = tabText.split('[')[0].trim();
+            const index = parseInt(tabText.split('[')[1]) || 1;
+            currentTabType = type;
+            currentTabIndex = index;
+          } else {
+            currentTabType = tabText;
+            currentTabIndex = 1;
+          }
+          
+          // Hide all tabs and remove active class from all links
           $(".tab").hide();
+          $("ul li a").removeClass("active");
+          
+          // Show selected tab and add active class to clicked link
           $(target).show();
+          $(this).addClass("active");
         });
+
+        // Also update the displayManifests function to set initial active state
+        // Add this line after creating the tabs:
+        $("ul li a:first").addClass("active");
+      }
+
+      // Add function to update history dropdown
+      function updateHistoryDropdown() {
+        const historyList = $("#history-list");
+        const historyTabsContainer = $(".history-tabs-container");
+        historyList.empty();
+        historyTabsContainer.empty();
+        
+        manifestHistory.forEach((entry, index) => {
+          const truncatedUrl = entry.url.length > 100 
+            ? entry.url.substring(0, 97) + '...' 
+            : entry.url;
+          
+          const listItem = $(`
+            <div class="history-item">
+              <div class="history-info">
+                <div class="history-header">
+                  <span class="history-index">#${index + 1}</span>
+                  <button class="copy-url-btn" data-url="${entry.url}" title="Copy URL">
+                    📋
+                  </button>
+                </div>
+                <span class="history-url" title="${entry.url}">${truncatedUrl}</span>
+                <span class="history-timestamp">${entry.timestamp}</span>
+              </div>
+              <button class="view-history-btn" data-index="${index}">View</button>
+            </div>
+          `);
+          historyList.append(listItem);
+
+          // Add history tab with corrected index numbering
+          const historyTab = $(`
+            <button class="history-tab ${index === 0 ? 'active' : ''}" 
+                    data-index="${index}"
+                    title="Fetched: ${entry.timestamp}">
+              ${truncatedUrl.substring(0, 30)}${truncatedUrl.length > 30 ? '...' : ''}
+              <span class="history-tab-index">#${index + 1}</span>
+            </button>
+          `);
+          historyTabsContainer.append(historyTab);
+        });
+      }
+
+      // Add click handler for history tabs
+      $(document).on("click", ".history-tab", function() {
+        const index = $(this).data("index");
+        const historyEntry = manifestHistory[index];
+        
+        // Update active state of tabs
+        $(".history-tab").removeClass("active");
+        $(this).addClass("active");
+        
+        displayManifests(historyEntry.manifests);
+        
+        // Find and activate the equivalent playlist tab
+        if (currentTabType) {
+          let targetTab = null;
+          
+          $("#tabs li a").each(function() {
+            const tabText = $(this).text();
+            if (currentTabType === "Master Manifest") {
+              if (tabText === currentTabType) {
+                targetTab = $(this);
+                return false;
+              }
+            } else if (tabText.includes(currentTabType)) {
+              const tabIndex = parseInt(tabText.split('[')[1]) || 1;
+              if (tabIndex === currentTabIndex) {
+                targetTab = $(this);
+                return false;
+              }
+            }
+          });
+
+          if (targetTab) {
+            const target = targetTab.attr("href");
+            $(".tab").hide();
+            $("ul li a").removeClass("active");
+            $(target).show();
+            targetTab.addClass("active");
+          } else {
+            $("#tabs li a").first().click();
+          }
+        }
       });
+
+      // Toggle history dropdown
+      $("#history-toggle").click(function() {
+        $("#history-dropdown").toggleClass("show");
+      });
+
       function calculateTotalDuration(manifestContent) {
-        // Regular expression to match EXTINF tags and their durations
         const extinfRegex = /#EXTINF:([0-9.]+),/g;
         let match;
         let totalDuration = 0;
 
-        // Iterate through the manifest content and sum up the durations
         while ((match = extinfRegex.exec(manifestContent))) {
           totalDuration += parseFloat(match[1]);
         }
 
-        return totalDuration;
+        return totalDuration.toFixed(6);
       }
+
+      function calculateBreakCounts(manifestContent) {
+        const lines = manifestContent.split('\n');
+        let discontinuityCount = 0;
+        let cueOutCount = 0;
+
+        for (const line of lines) {
+          if (line.trim() === '#EXT-X-DISCONTINUITY') {
+            discontinuityCount++;
+          }
+          if (line.trim().startsWith('#EXT-X-CUE-OUT')) {
+            cueOutCount++;
+          }
+        }
+
+        return { discontinuityCount, cueOutCount };
+      }
+
       function calculateSegCount(manifestContent) {
-        // Regular expression to match EXTINF tags and their durations
         const extinfRegex = /#EXTINF:([0-9.]+),/g;
         let match;
         let c = 0;
 
-        // Iterate through the manifest content and sum up the durations
         while ((match = extinfRegex.exec(manifestContent))) {
           c++;
         }
-        loadingMessage.style.display = "none";
         return c;
       }
-    </script>
-  </head>
-  <body>
-    <h1>HLS Playlist Manifests Viewer</h1>
+
+      // Add these event listeners outside of document.ready
+      document.addEventListener('mousedown', function(event) {
+        const tooltip = document.getElementById('selection-tooltip');
+        if (tooltip && !event.target.closest('.line-numbers-content')) {
+          tooltip.style.display = 'none';
+        }
+      });
+
+      document.addEventListener('mousemove', function(event) {
+        const tooltip = document.getElementById('selection-tooltip');
+        const selection = window.getSelection();
+        if (tooltip && selection.toString() && event.target.closest('.line-numbers-content')) {
+          tooltip.style.left = (event.pageX + 10) + 'px';
+          tooltip.style.top = (event.pageY + 10) + 'px';
+        }
+      });
+
+      // Add these event listeners in your document.ready function
+      $("#settings-toggle").click(function() {
+        $("#settings-modal").show();
+      });
+
+      $("#close-settings").click(function() {
+        $("#settings-modal").hide();
+      });
+
+      $("#save-settings").click(function() {
+        const newMaxHistory = parseInt($("#max-history-input").val());
+        const newAllowDuplicates = $("#allow-duplicates-input").is(":checked");
+        const newHighlightDivergent = $("#highlight-divergent-input").is(":checked");
+        
+        // Validate max history value
+        if (newMaxHistory >= 1 && newMaxHistory <= 10) {
+          MAX_HISTORY = newMaxHistory;
+          ALLOW_DUPLICATES = newAllowDuplicates;
+          HIGHLIGHT_DIVERGENT = newHighlightDivergent;
+          
+          // Trim history if new max is smaller
+          while (manifestHistory.length > MAX_HISTORY) {
+            manifestHistory.pop();
+          }
+          
+          updateHistoryDropdown();
+          // Refresh current view to apply new highlight setting
+          if (manifestHistory.length > 0) {
+            displayManifests(manifestHistory[0].manifests);
+          }
+          $("#settings-modal").hide();
+        }
+      });
+
+      // Add this new function to parse media sequence info
+      function getMediaSequenceInfo(manifestContent) {
+        const lines = manifestContent.split('\n');
+        let mediaSequence = null;
+        let discSequence = null;
+        let hasEndlist = false;
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+            mediaSequence = parseInt(trimmedLine.split(':')[1]);
+          }
+          if (trimmedLine.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
+            discSequence = parseInt(trimmedLine.split(':')[1]);
+          }
+          if (trimmedLine === '#EXT-X-ENDLIST') {
+            hasEndlist = true;
+          }
+        }
+
+        return { mediaSequence, discSequence, hasEndlist };
+      }
+
+      // Add click handler for copy button
+      $(document).on("click", ".copy-url-btn", function(e) {
+        e.stopPropagation();
+        const url = $(this).data("url");
+        navigator.clipboard.writeText(url).then(() => {
+          // Show temporary success state
+          const btn = $(this);
+          btn.text("✓").css("color", "#4CAF50");
+          setTimeout(() => {
+            btn.text("📋").css("color", "inherit");
+          }, 1000);
+        });
+      });
+    });
+  </script>
+</head>
+
+<body>
+  <h1>HLS Playlist Manifests Viewer</h1>
+  <div class="top-controls">
     <form id="fetch-form">
       <label for="url-input">HLS Stream URL:</label>
       <input type="text" id="url-input" placeholder="Enter HLS stream URL" required />
       <button type="submit">Fetch</button>
     </form>
-    <div id="loadingMessage" style="display: none">Loading...</div>
-    <hr />
-    <ul id="tabs"></ul>
-    <div id="manifests-container"></div>
-    <div id="total-segment-durations"></div>
-    <!-- New section to display total segment durations -->
-    <!-- Add a button to scroll back to the top -->
-    <button onclick="topFunction()" id="scrollToTopBtn" title="Go to top">Back to Top</button>
+    <div class="history-container">
+      <div class="history-buttons">
+        <button id="history-toggle">History</button>
+        <button id="settings-toggle" title="Settings">⚙️</button>
+      </div>
+      <div id="history-dropdown">
+        <div id="history-list"></div>
+      </div>
+    </div>
+  </div>
+  <div id="loadingMessage" style="display: none">Loading...</div>
+  <div id="error-message" class="error-message" style="display: none"></div>
+  <div id="history-tabs" class="history-tabs">
+    <div class="history-tabs-scroll">
+      <div class="history-tabs-container"></div>
+    </div>
+  </div>
+  <hr />
+  <ul id="tabs"></ul>
+  <div id="manifests-container"></div>
+  <div id="total-segment-durations"></div>
+  <button onclick="topFunction()" id="scrollToTopBtn" title="Go to top">Back to Top</button>
 
-    <script>
-      // Function to scroll back to the top when the button is clicked
-      function topFunction() {
-        document.body.scrollTop = 0; // For Safari
-        document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
-      }
-    </script>
-  </body>
+  <div id="settings-modal" class="modal">
+    <div class="modal-content">
+      <h2>General Settings</h2>
+      <div class="setting-item">
+        <label>
+          Max History Size (1-10):
+          <input type="number" id="max-history-input" min="1" max="10" value="5">
+        </label>
+      </div>
+      <div class="setting-item">
+        <label>
+          <input type="checkbox" id="allow-duplicates-input" checked>
+          Allow Duplicate URLs
+        </label>
+      </div>
+      <div class="setting-item">
+        <label>
+          <input type="checkbox" id="highlight-divergent-input" checked>
+          Highlight Divergent Sequences
+        </label>
+      </div>
+      <div class="modal-buttons">
+        <button id="save-settings">Save</button>
+        <button id="close-settings">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function topFunction() {
+      document.body.scrollTop = 0; // For Safari
+      document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
+    }
+  </script>
+</body>
+
 </html>
