@@ -2,19 +2,18 @@
 <html>
 
 <head>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="./styles.css" />
   <title>HLS Playlist Manifests Viewer</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/styles/default.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.3.1/highlight.min.js"></script>
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script>
-    const manifestHistory = [];
-    let MAX_HISTORY = 5;
-    let ALLOW_DUPLICATES = true;
-    let HIGHLIGHT_DIVERGENT = true;
+    const manifestHistory = JSON.parse(localStorage.getItem('manifestHistory') || '[]');
+    let MAX_HISTORY = parseInt(localStorage.getItem('maxHistory') || '5');
+    let ALLOW_DUPLICATES = localStorage.getItem('allowDuplicates') !== 'false';
+    let HIGHLIGHT_DIVERGENT = localStorage.getItem('highlightDivergent') !== 'false';
     let currentTabType = null;
     let currentTabIndex = null;
-
 
     function calculateSelectedDuration(selectedText) {
       const extinfRegex = /#EXTINF:([0-9.]+),/g;
@@ -54,6 +53,68 @@
       }
     }
 
+    function calculateTotalDuration(manifestContent) {
+      const extinfRegex = /#EXTINF:([0-9.]+),/g;
+      let match;
+      let totalDuration = 0;
+
+      while ((match = extinfRegex.exec(manifestContent))) {
+        totalDuration += parseFloat(match[1]);
+      }
+
+      return totalDuration.toFixed(6);
+    }
+
+    function calculateBreakCounts(manifestContent) {
+      const lines = manifestContent.split('\n');
+      let discontinuityCount = 0;
+      let cueOutCount = 0;
+
+      for (const line of lines) {
+        if (line.trim() === '#EXT-X-DISCONTINUITY') {
+          discontinuityCount++;
+        }
+        if (line.trim().startsWith('#EXT-X-CUE-OUT')) {
+          cueOutCount++;
+        }
+      }
+
+      return { discontinuityCount, cueOutCount };
+    }
+
+    function calculateSegCount(manifestContent) {
+      const extinfRegex = /#EXTINF:([0-9.]+),/g;
+      let match;
+      let count = 0;
+
+      while ((match = extinfRegex.exec(manifestContent))) {
+        count++;
+      }
+      return count;
+    }
+
+    function getMediaSequenceInfo(manifestContent) {
+      const lines = manifestContent.split('\n');
+      let mediaSequence = null;
+      let discSequence = null;
+      let hasEndlist = false;
+
+      for (const line of lines) {
+        const trimmedLine = line.trim();
+        if (trimmedLine.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+          mediaSequence = parseInt(trimmedLine.split(':')[1]);
+        }
+        if (trimmedLine.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
+          discSequence = parseInt(trimmedLine.split(':')[1]);
+        }
+        if (trimmedLine === '#EXT-X-ENDLIST') {
+          hasEndlist = true;
+        }
+      }
+
+      return { mediaSequence, discSequence, hasEndlist };
+    }
+
     $(document).ready(function () {
       $("#fetch-form").on("submit", function (event) {
         event.preventDefault();
@@ -64,243 +125,177 @@
         errorMessage.hide(); 
         
         try {
-          $.get("/fetch", { url: $("#url-input").val() })
-            .done(function (response) {
-              displayManifests(response.manifests, $("#url-input").val());
-              loadingMessage.style.display = "none";
-            })
-            .fail(function (jqXHR, textStatus, errorThrown) {
-              loadingMessage.style.display = "none";
-              let message = "Error fetching manifests: ";
-              if (jqXHR.status >= 500) {
-                message += `Server error occurred (${jqXHR.status})`;
-              } else if (jqXHR.status === 404) {
-                message += `Manifest not found (${jqXHR.status})`;
-              } else if (textStatus === "timeout") {
-                message += "Request timed out";
-              } else if (jqXHR.status) {
-                message += `${errorThrown || "Unknown error"} (${jqXHR.status})`;
-              } else {
-                message += errorThrown || "Unknown error occurred";
-              }
-              errorMessage.text(message).show();
-            });
+          fetchManifests($("#url-input").val());
         } catch (error) {
           loadingMessage.style.display = "none";
           errorMessage.text("Error: " + error.message).show();
         }
       });
 
-      function displayManifests(manifests, url = '') {
-        if (url) {
-          const isDuplicate = manifestHistory.some(entry => entry.url === url);
-          
-          if (!isDuplicate || ALLOW_DUPLICATES) {
-            const historyEntry = {
-              url: url,
-              timestamp: new Date().toLocaleString(),
-              manifests: manifests
-            };
-            
-            manifestHistory.unshift(historyEntry);
-            while (manifestHistory.length > MAX_HISTORY) {
-              manifestHistory.pop();
-            }
-            
-            updateHistoryDropdown();
+      async function fetchManifests(url) {
+        const loadingMessage = document.getElementById("loadingMessage");
+        const errorMessage = $("#error-message");
+        
+        try {
+          // Fetch master manifest
+          const masterResponse = await fetch(url);
+          if (!masterResponse.ok) {
+            throw new Error(`HTTP error! status: ${masterResponse.status}`);
           }
-        }
+          const masterManifestContent = await masterResponse.text();
+          const masterOrigin = new URL(url).origin;
 
-        $("#manifests-container").empty();
-        $("#tabs").empty();
-        let videoCount = 1;
-        let audioCount = 1;
-        let subCount = 1;
-        for (let i = 0; i < manifests.length; i++) {
-          const manifest = manifests[i];
-          const tabId = `tab-${i}`;
+          // Parse video variants
+          const regex = /#EXT-X-STREAM-INF:(.+)\n(.+)/g;
+          const videoUrls = [];
+          const bandwidths = [];
+          let match;
 
-          let manifestName = "";
-          let tooltipText = "";
-          
-          if (manifest.type === "Master Manifest") {
-            manifestName = manifest.type;
-          } else if (manifest.type === "Media Manifest") {
-            manifestName = `${manifest.type}[${videoCount}]`;
-            if (manifest.bandwidth) {
-              tooltipText = `BW: ${manifest.bandwidth}`;
+          while ((match = regex.exec(masterManifestContent))) {
+            const attributes = match[1];
+            let manifestUrl = match[2];
+            const bandwidthMatch = attributes.match(/BANDWIDTH=(\d+)/);
+            const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1]) : null;
+
+            if (!manifestUrl.startsWith("http")) {
+              manifestUrl = new URL(manifestUrl, new URL(url)).href;
             }
-            videoCount++;
-          } else if (manifest.type === "Audio Manifest") {
-            manifestName = `${manifest.type}[${audioCount}]`;
-            if (manifest.metadata) {
-              tooltipText = `${manifest.metadata.groupId};${manifest.metadata.language}`;
-            }
-            audioCount++;
-          } else if (manifest.type === "Subtitle Manifest") {
-            manifestName = `${manifest.type}[${subCount}]`;
-            if (manifest.metadata) {
-              tooltipText = `${manifest.metadata.groupId};${manifest.metadata.language}`;
-            }
-            subCount++;
-          } else {
-            manifestName = "Other M3U8";
+
+            videoUrls.push(manifestUrl);
+            bandwidths.push(bandwidth);
           }
-          const tabLink = $(`<li><a href="#${tabId}" ${tooltipText ? `title="${tooltipText}"` : ''}>${manifestName}</a></li>`);
-          const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
 
-          const formatDuration = (seconds) => {
-            const h = Math.floor(seconds / 3600);
-            const m = Math.floor((seconds % 3600) / 60);
-            const s = (seconds % 60).toFixed(2);
+          // Parse audio streams
+          const regexA = /#EXT-X-MEDIA:TYPE=AUDIO.*?URI="(.+?)"/g;
+          const audioUrls = [];
+          const audioInfo = [];
 
-            return [
-              h > 0 ? `${h}h` : '',
-              m > 0 ? `${m}m` : '',
-              s > 0 ? `${s}s` : ''
-            ].filter(Boolean).join('');
-          };
+          while ((match = regexA.exec(masterManifestContent))) {
+            let audioUrl = match[1];
+            const groupMatch = match[0].match(/GROUP-ID="([^"]+)"/);
+            const langMatch = match[0].match(/LANGUAGE="([^"]+)"/);
+            const nameMatch = match[0].match(/NAME="([^"]+)"/);
+            const groupId = groupMatch ? groupMatch[1] : 'unknown';
+            const language = langMatch ? langMatch[1] : nameMatch ? nameMatch[1] : 'unknown';
 
-          const totalDuration = calculateTotalDuration(manifest.content);
-          const segmentCount = calculateSegCount(manifest.content);
-          const breakCounts = calculateBreakCounts(manifest.content);
-          const sequenceInfo = getMediaSequenceInfo(manifest.content);
+            if (!audioUrl.startsWith("http")) {
+              audioUrl = new URL(audioUrl, new URL(url)).href;
+            }
 
-          const mediaSequences = [];
-          const discSequences = [];
-          for (const manifest of manifests) {
-            if (manifest.type !== "Master Manifest") {
-              const sequenceInfo = getMediaSequenceInfo(manifest.content);
-              if (sequenceInfo.mediaSequence !== null && !sequenceInfo.hasEndlist) {
-                mediaSequences.push(sequenceInfo.mediaSequence);
+            audioUrls.push(audioUrl);
+            audioInfo.push({ url: audioUrl, groupId, language });
+          }
+
+          // Parse subtitles
+          const subtitleUrls = [];
+          const subtitleInfo = [];
+          const subtitleRegex = /#EXT-X-MEDIA:TYPE=SUBTITLES.*?URI="(.+?)"/g;
+
+          while ((match = subtitleRegex.exec(masterManifestContent))) {
+            let subtitleUrl = match[1];
+            const groupMatch = match[0].match(/GROUP-ID="([^"]+)"/);
+            const langMatch = match[0].match(/LANGUAGE="([^"]+)"/);
+            const nameMatch = match[0].match(/NAME="([^"]+)"/);
+            const groupId = groupMatch ? groupMatch[1] : 'unknown';
+            const language = langMatch ? langMatch[1] : nameMatch ? nameMatch[1] : 'unknown';
+
+            if (!subtitleUrl.startsWith("http")) {
+              subtitleUrl = new URL(subtitleUrl, new URL(url)).href;
+            }
+            subtitleUrls.push(subtitleUrl);
+            subtitleInfo.push({ url: subtitleUrl, groupId, language });
+          }
+
+          // Fetch all manifests
+          const manifestUrls = [url, ...videoUrls, ...audioUrls, ...subtitleUrls];
+          const manifests = await Promise.all(manifestUrls.map(async (manifestUrl, index) => {
+            try {
+              const response = await fetch(manifestUrl);
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
               }
-              if (sequenceInfo.discSequence !== null) {
-                discSequences.push(sequenceInfo.discSequence);
+              const content = await response.text();
+
+              let type;
+              let bandwidth = null;
+              let metadata = null;
+
+              if (manifestUrl === url) {
+                type = "Master Manifest";
+              } else if (audioUrls.includes(manifestUrl)) {
+                type = "Audio Manifest";
+                const audioMeta = audioInfo.find(info => info.url === manifestUrl);
+                if (audioMeta) {
+                  metadata = {
+                    groupId: audioMeta.groupId,
+                    language: audioMeta.language
+                  };
+                }
+              } else if (subtitleUrls.includes(manifestUrl)) {
+                type = "Subtitle Manifest";
+                const subtitleMeta = subtitleInfo.find(info => info.url === manifestUrl);
+                if (subtitleMeta) {
+                  metadata = {
+                    groupId: subtitleMeta.groupId,
+                    language: subtitleMeta.language
+                  };
+                }
+              } else {
+                type = "Media Manifest";
+                const mediaIndex = videoUrls.indexOf(manifestUrl);
+                if (mediaIndex !== -1) {
+                  bandwidth = bandwidths[mediaIndex];
+                }
               }
+
+              return {
+                type,
+                content: content.replace(/(#EXT[^:]+:)/g, "\n$1").replace(/\n(\n+)/g, "\n"),
+                bandwidth,
+                metadata,
+                url: manifestUrl
+              };
+            } catch (error) {
+              console.error(`Error fetching manifest ${manifestUrl}:`, error.message);
+              return {
+                type: "Error",
+                content: `Failed to fetch manifest: ${error.message}`,
+                url: manifestUrl,
+                error: true
+              };
+            }
+          }));
+
+          // Save to history
+          if (url) {
+            const isDuplicate = manifestHistory.some(entry => entry.url === url);
+            
+            if (!isDuplicate || ALLOW_DUPLICATES) {
+              const historyEntry = {
+                url: url,
+                timestamp: new Date().toLocaleString(),
+                manifests: manifests
+              };
+              
+              manifestHistory.unshift(historyEntry);
+              while (manifestHistory.length > MAX_HISTORY) {
+                manifestHistory.pop();
+              }
+              
+              localStorage.setItem('manifestHistory', JSON.stringify(manifestHistory));
+              updateHistoryDropdown();
             }
           }
 
-          if (manifest.type === "Master Manifest") {
-            const mostCommonMediaSeq = mediaSequences.length > 0 
-              ? mediaSequences.reduce((a, b) =>
-                  mediaSequences.filter(v => v === a).length >= mediaSequences.filter(v => v === b).length ? a : b
-                )
-              : null;
+          // Display the manifests
+          displayManifests(manifests, url);
+          loadingMessage.style.display = "none";
 
-            const mostCommonDiscSeq = discSequences.length > 0 
-              ? discSequences.reduce((a, b) =>
-                  discSequences.filter(v => v === a).length >= discSequences.filter(v => v === b).length ? a : b
-                )
-              : null;
-
-            const formattedMediaSeqs = mediaSequences.map(seq => 
-              HIGHLIGHT_DIVERGENT && seq !== mostCommonMediaSeq 
-                ? `<span class="divergent-sequence">${seq}</span>` 
-                : seq
-            );
-
-            const formattedDiscSeqs = discSequences.map(seq => 
-              HIGHLIGHT_DIVERGENT && seq !== mostCommonDiscSeq 
-                ? `<span class="divergent-sequence">${seq}</span>` 
-                : seq
-            );
-
-            const metricsHtml = `
-              <div class="metrics-container">
-                ${mediaSequences.length > 0 ? `
-                  <div class="metric-box">
-                    <h3>Media Sequences</h3>
-                    <div class="metric-value">${formattedMediaSeqs.join(', ')}</div>
-                  </div>
-                ` : ''}
-                ${discSequences.length > 0 ? `
-                  <div class="metric-box">
-                    <h3>Discontinuity Sequences</h3>
-                    <div class="metric-value">${formattedDiscSeqs.join(', ')}</div>
-                  </div>
-                ` : ''}
-              </div>
-            `;
-            if (mediaSequences.length > 0 || discSequences.length > 0) {
-              tabContent.append(metricsHtml);
-            }
-          } else if (manifest.type !== "Master Manifest") {
-            const metricsHtml = `
-              <div class="metrics-container">
-                <div class="metric-box">
-                  <h3>Total Duration</h3>
-                  <div class="metric-value">
-                    ${formatDuration(totalDuration)} (${totalDuration} seconds)
-                  </div>
-                </div>
-                <div class="metric-box">
-                  <h3>Segment Count</h3>
-                  <div class="metric-value">${segmentCount}</div>
-                </div>
-                <div class="metric-box">
-                  <h3>Discontinuities</h3>
-                  <div class="metric-value">${breakCounts.discontinuityCount}</div>
-                </div>
-                <div class="metric-box">
-                  <h3>Cue-outs</h3>
-                  <div class="metric-value">${breakCounts.cueOutCount}</div>
-                </div>
-              </div>
-            `;
-            tabContent.append(metricsHtml);
-          }
-
-          const lines = manifest.content.split('\n');
-          const lineNumbersHtml = lines.map((_, i) => `<span class="line-number">${i + 1}</span>`).join('');
-
-          const manifestContentHtml = `
-            <div class="line-numbers">
-              <div class="line-numbers-rows">
-                ${lineNumbersHtml}
-              </div>
-              <div class="line-numbers-content" onmouseup="handleSelection(event)">
-                <pre><code>${manifest.content}</code></pre>
-              </div>
-            </div>
-            <div class="manifest-url">
-              ${manifest.url || url}
-            </div>
-          `;
-
-          tabContent.append(manifestContentHtml);
-          $("#tabs").append(tabLink);
-          $("#manifests-container").append(tabContent);
+        } catch (error) {
+          console.error("Error:", error);
+          loadingMessage.style.display = "none";
+          errorMessage.text(`Error fetching manifests: ${error.message}`).show();
         }
-
-        $(".tab:first").show();
-        $("pre code").each(function (i, block) {
-          hljs.highlightBlock(block);
-        });
-        loadingMessage.style.display = "none";
-
-        $(document).on("click", "a", function (event) {
-          event.preventDefault();
-          const target = $(this).attr("href");
-          
-          const tabText = $(this).text();
-          if (tabText.includes('[')) {
-            const type = tabText.split('[')[0].trim();
-            const index = parseInt(tabText.split('[')[1]) || 1;
-            currentTabType = type;
-            currentTabIndex = index;
-          } else {
-            currentTabType = tabText;
-            currentTabIndex = 1;
-          }
-          
-          $(".tab").hide();
-          $("ul li a").removeClass("active");
-          
-          $(target).show();
-          $(this).addClass("active");
-        });
-
-        $("ul li a:first").addClass("active");
       }
 
       function updateHistoryDropdown() {
@@ -387,46 +382,6 @@
         $("#history-dropdown").toggleClass("show");
       });
 
-      function calculateTotalDuration(manifestContent) {
-        const extinfRegex = /#EXTINF:([0-9.]+),/g;
-        let match;
-        let totalDuration = 0;
-
-        while ((match = extinfRegex.exec(manifestContent))) {
-          totalDuration += parseFloat(match[1]);
-        }
-
-        return totalDuration.toFixed(6);
-      }
-
-      function calculateBreakCounts(manifestContent) {
-        const lines = manifestContent.split('\n');
-        let discontinuityCount = 0;
-        let cueOutCount = 0;
-
-        for (const line of lines) {
-          if (line.trim() === '#EXT-X-DISCONTINUITY') {
-            discontinuityCount++;
-          }
-          if (line.trim().startsWith('#EXT-X-CUE-OUT')) {
-            cueOutCount++;
-          }
-        }
-
-        return { discontinuityCount, cueOutCount };
-      }
-
-      function calculateSegCount(manifestContent) {
-        const extinfRegex = /#EXTINF:([0-9.]+),/g;
-        let match;
-        let c = 0;
-
-        while ((match = extinfRegex.exec(manifestContent))) {
-          c++;
-        }
-        return c;
-      }
-
       document.addEventListener('mousedown', function(event) {
         const tooltip = document.getElementById('selection-tooltip');
         if (tooltip && !event.target.closest('.line-numbers-content')) {
@@ -461,10 +416,15 @@
           ALLOW_DUPLICATES = newAllowDuplicates;
           HIGHLIGHT_DIVERGENT = newHighlightDivergent;
 
+          localStorage.setItem('maxHistory', MAX_HISTORY);
+          localStorage.setItem('allowDuplicates', ALLOW_DUPLICATES);
+          localStorage.setItem('highlightDivergent', HIGHLIGHT_DIVERGENT);
+
           while (manifestHistory.length > MAX_HISTORY) {
             manifestHistory.pop();
           }
           
+          localStorage.setItem('manifestHistory', JSON.stringify(manifestHistory));
           updateHistoryDropdown();
           if (manifestHistory.length > 0) {
             displayManifests(manifestHistory[0].manifests);
@@ -472,28 +432,6 @@
           $("#settings-modal").hide();
         }
       });
-
-      function getMediaSequenceInfo(manifestContent) {
-        const lines = manifestContent.split('\n');
-        let mediaSequence = null;
-        let discSequence = null;
-        let hasEndlist = false;
-
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (trimmedLine.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
-            mediaSequence = parseInt(trimmedLine.split(':')[1]);
-          }
-          if (trimmedLine.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
-            discSequence = parseInt(trimmedLine.split(':')[1]);
-          }
-          if (trimmedLine === '#EXT-X-ENDLIST') {
-            hasEndlist = true;
-          }
-        }
-
-        return { mediaSequence, discSequence, hasEndlist };
-      }
 
       $(document).on("click", ".copy-url-btn", function(e) {
         e.stopPropagation();
@@ -506,7 +444,218 @@
           }, 1000);
         });
       });
+
+      $(document).on("click", "ul li a", function (event) {
+        event.preventDefault();
+        const target = $(this).attr("href");
+        
+        const tabText = $(this).text();
+        if (tabText.includes('[')) {
+          const type = tabText.split('[')[0].trim();
+          const index = parseInt(tabText.split('[')[1]) || 1;
+          currentTabType = type;
+          currentTabIndex = index;
+        } else {
+          currentTabType = tabText;
+          currentTabIndex = 1;
+        }
+        
+        $(".tab").hide();
+        $("ul li a").removeClass("active");
+        
+        $(target).show();
+        $(this).addClass("active");
+      });
+
+      // Make sure first tab is active by default
+      $("ul li a:first").addClass("active");
     });
+
+    function displayManifests(manifests, url = '') {
+      $("#manifests-container").empty();
+      $("#tabs").empty();
+      let videoCount = 1;
+      let audioCount = 1;
+      let subCount = 1;
+
+      for (let i = 0; i < manifests.length; i++) {
+        const manifest = manifests[i];
+        const tabId = `tab-${i}`;
+        let manifestName = "";
+        let tooltipText = "";
+
+        // Create tabLink and tabContent BEFORE any conditional logic
+        const tabLink = $('<li></li>');  // Create empty li first
+        const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
+
+        if (manifest.type === "Master Manifest") {
+          manifestName = manifest.type;
+          // Create the anchor with the name and tooltip AFTER we know them
+          tabLink.html(`<a href="#${tabId}">${manifestName}</a>`);
+          
+          const mediaSequences = [];
+          const discSequences = [];
+          
+          manifests.forEach(m => {
+            if (m.type !== "Master Manifest") {
+              const sequenceInfo = getMediaSequenceInfo(m.content);
+              if (sequenceInfo.mediaSequence !== null && !sequenceInfo.hasEndlist) {
+                mediaSequences.push(sequenceInfo.mediaSequence);
+              }
+              if (sequenceInfo.discSequence !== null) {
+                discSequences.push(sequenceInfo.discSequence);
+              }
+            }
+          });
+
+          if (mediaSequences.length > 0 || discSequences.length > 0) {
+            const mostCommonMediaSeq = mediaSequences.length > 0 
+              ? mediaSequences.reduce((a, b) =>
+                  mediaSequences.filter(v => v === a).length >= mediaSequences.filter(v => v === b).length ? a : b
+                )
+              : null;
+
+            const mostCommonDiscSeq = discSequences.length > 0 
+              ? discSequences.reduce((a, b) =>
+                  discSequences.filter(v => v === a).length >= discSequences.filter(v => v === b).length ? a : b
+                )
+              : null;
+
+            const formattedMediaSeqs = mediaSequences.map(seq => 
+              HIGHLIGHT_DIVERGENT && seq !== mostCommonMediaSeq 
+                ? `<span class="divergent-sequence">${seq}</span>` 
+                : seq
+            );
+
+            const formattedDiscSeqs = discSequences.map(seq => 
+              HIGHLIGHT_DIVERGENT && seq !== mostCommonDiscSeq 
+                ? `<span class="divergent-sequence">${seq}</span>` 
+                : seq
+            );
+
+            const metricsHtml = `
+              <div class="metrics-container">
+                ${mediaSequences.length > 0 ? `
+                  <div class="metric-box">
+                    <h3>Media Sequences</h3>
+                    <div class="metric-value">${formattedMediaSeqs.join(', ')}</div>
+                  </div>
+                ` : ''}
+                ${discSequences.length > 0 ? `
+                  <div class="metric-box">
+                    <h3>Discontinuity Sequences</h3>
+                    <div class="metric-value">${formattedDiscSeqs.join(', ')}</div>
+                  </div>
+                ` : ''}
+              </div>
+            `;
+            tabContent.append(metricsHtml);
+          }
+        } else if (manifest.type === "Media Manifest") {
+          manifestName = `${manifest.type}[${videoCount}]`;
+          if (manifest.bandwidth) {
+            tooltipText = `BW: ${manifest.bandwidth}`;
+          }
+          // Create the anchor with the name and tooltip AFTER we know them
+          tabLink.html(`<a href="#${tabId}" ${tooltipText ? `title="${tooltipText}"` : ''}>${manifestName}</a>`);
+          videoCount++;
+        } else if (manifest.type === "Audio Manifest") {
+          manifestName = `${manifest.type}[${audioCount}]`;
+          if (manifest.metadata) {
+            tooltipText = `${manifest.metadata.groupId};${manifest.metadata.language}`;
+          }
+          // Create the anchor with the name and tooltip AFTER we know them
+          tabLink.html(`<a href="#${tabId}" ${tooltipText ? `title="${tooltipText}"` : ''}>${manifestName}</a>`);
+          audioCount++;
+        } else if (manifest.type === "Subtitle Manifest") {
+          manifestName = `${manifest.type}[${subCount}]`;
+          if (manifest.metadata) {
+            tooltipText = `${manifest.metadata.groupId};${manifest.metadata.language}`;
+          }
+          // Create the anchor with the name and tooltip AFTER we know them
+          tabLink.html(`<a href="#${tabId}" ${tooltipText ? `title="${tooltipText}"` : ''}>${manifestName}</a>`);
+          subCount++;
+        } else {
+          manifestName = "Other M3U8";
+          // Create the anchor with the name and tooltip AFTER we know them
+          tabLink.html(`<a href="#${tabId}">${manifestName}</a>`);
+        }
+
+        const formatDuration = (seconds) => {
+          const h = Math.floor(seconds / 3600);
+          const m = Math.floor((seconds % 3600) / 60);
+          const s = (seconds % 60).toFixed(2);
+          return [
+            h > 0 ? `${h}h` : '',
+            m > 0 ? `${m}m` : '',
+            s > 0 ? `${s}s` : ''
+          ].filter(Boolean).join('');
+        };
+
+        const totalDuration = calculateTotalDuration(manifest.content);
+        const segmentCount = calculateSegCount(manifest.content);
+        const breakCounts = calculateBreakCounts(manifest.content);
+        const sequenceInfo = getMediaSequenceInfo(manifest.content);
+
+        if (manifest.type !== "Master Manifest") {
+          const metricsHtml = `
+            <div class="metrics-container">
+              <div class="metric-box">
+                <h3>Total Duration</h3>
+                <div class="metric-value">
+                  ${formatDuration(totalDuration)} (${totalDuration} seconds)
+                </div>
+              </div>
+              <div class="metric-box">
+                <h3>Segment Count</h3>
+                <div class="metric-value">${segmentCount}</div>
+              </div>
+              <div class="metric-box">
+                <h3>Discontinuities</h3>
+                <div class="metric-value">${breakCounts.discontinuityCount}</div>
+              </div>
+              <div class="metric-box">
+                <h3>Cue-outs</h3>
+                <div class="metric-value">${breakCounts.cueOutCount}</div>
+              </div>
+            </div>
+          `;
+          tabContent.append(metricsHtml);
+        }
+
+        const lines = manifest.content.split('\n');
+        const lineNumbersHtml = lines.map((_, i) => `<span class="line-number">${i + 1}</span>`).join('');
+
+        const manifestContentHtml = `
+          <div class="line-numbers">
+            <div class="line-numbers-rows">
+              ${lineNumbersHtml}
+            </div>
+            <div class="line-numbers-content" onmouseup="handleSelection(event)">
+              <pre><code>${manifest.content}</code></pre>
+            </div>
+          </div>
+          <button onclick="topFunction()" id="scrollToTopBtn" title="Go to top">Back to Top</button>
+          <div class="manifest-url">
+            ${manifest.url || url}
+          </div>
+        `;
+
+        tabContent.append(manifestContentHtml);
+        $("#tabs").append(tabLink);
+        $("#manifests-container").append(tabContent);
+      }
+
+      $(".tab:first").show();
+      $("pre code").each(function (i, block) {
+        hljs.highlightBlock(block);
+      });
+    }
+
+    function topFunction() {
+      document.body.scrollTop = 0; // For Safari
+      document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
+    }
   </script>
 </head>
 
@@ -539,7 +688,6 @@
   <ul id="tabs"></ul>
   <div id="manifests-container"></div>
   <div id="total-segment-durations"></div>
-  <button onclick="topFunction()" id="scrollToTopBtn" title="Go to top">Back to Top</button>
 
   <div id="settings-modal" class="modal">
     <div class="modal-content">
@@ -568,13 +716,6 @@
       </div>
     </div>
   </div>
-
-  <script>
-    function topFunction() {
-      document.body.scrollTop = 0; // For Safari
-      document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
-    }
-  </script>
 </body>
 
 </html>
