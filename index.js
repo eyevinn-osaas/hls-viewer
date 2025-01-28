@@ -19,7 +19,6 @@ app.get("/fetch", async (req, res) => {
     const masterManifestContent = masterResponse.data;
     const masterOrigin = new URL(masterUrl).origin;
 
-    // Extract URLs and bandwidths of manifest files from the master manifest
     const regex = /#EXT-X-STREAM-INF:(.+)\n(.+)/g;
     const videoUrls = [];
     const bandwidths = [];
@@ -28,8 +27,6 @@ app.get("/fetch", async (req, res) => {
     while ((match = regex.exec(masterManifestContent))) {
       const attributes = match[1];
       let manifestUrl = match[2];
-      
-      // Extract bandwidth from attributes
       const bandwidthMatch = attributes.match(/BANDWIDTH=(\d+)/);
       const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1]) : null;
 
@@ -41,14 +38,12 @@ app.get("/fetch", async (req, res) => {
       bandwidths.push(bandwidth);
     }
 
-    // Extract URLs of manifest files from the master manifest
     const regexA = /#EXT-X-MEDIA:TYPE=AUDIO.*?URI="(.+?)"/g;
     const audioUrls = [];
-    const audioInfo = [];  // Add this to store audio metadata
+    const audioInfo = [];
 
     while ((match = regexA.exec(masterManifestContent))) {
       let audioUrl = match[1];
-      // Extract GROUP-ID and LANGUAGE from the full match
       const groupMatch = match[0].match(/GROUP-ID="([^"]+)"/);
       const langMatch = match[0].match(/LANGUAGE="([^"]+)"/);
       const nameMatch = match[0].match(/NAME="([^"]+)"/);
@@ -63,14 +58,12 @@ app.get("/fetch", async (req, res) => {
       audioInfo.push({ url: audioUrl, groupId, language });
     }
 
-    // Extract URLs of subtitle manifests from the master manifest
     const subtitleUrls = [];
-    const subtitleInfo = [];  // Add this to store subtitle metadata
+    const subtitleInfo = [];
     const subtitleRegex = /#EXT-X-MEDIA:TYPE=SUBTITLES.*?URI="(.+?)"/g;
 
     while ((match = subtitleRegex.exec(masterManifestContent))) {
       let subtitleUrl = match[1];
-      // Extract GROUP-ID and LANGUAGE from the full match
       const groupMatch = match[0].match(/GROUP-ID="([^"]+)"/);
       const langMatch = match[0].match(/LANGUAGE="([^"]+)"/);
       const nameMatch = match[0].match(/NAME="([^"]+)"/);
@@ -83,10 +76,8 @@ app.get("/fetch", async (req, res) => {
         subtitleInfo.push({ url: subtitleUrl, groupId, language });
       }
     }
-    // Combine all manifest URLs (master, media, audio, subtitle)
     const manifestUrls = [masterUrl, ...videoUrls, ...audioUrls, ...subtitleUrls];
 
-    // Fetch each manifest file individually
     const fetchPromises = manifestUrls.map(async (manifestUrl, index) => {
       try {
         const httpsUrlPattern = /^https:\/\/[^\s/$.?#].[^\s]*$/i;
@@ -96,11 +87,10 @@ app.get("/fetch", async (req, res) => {
         } else {
           video_uri = new URL(manifestUrl, new URL(masterUrl)).href;
         }
-        //console.log("[Fetching URL]:", video_uri, manifestUrl, masterUrl);
+        
         const manifestResponse = await axios.get(video_uri);
         const manifestContent = manifestResponse.data;
 
-        // Determine the manifest type and add metadata
         let manifestType;
         let bandwidth = null;
         let metadata = null;
@@ -133,26 +123,48 @@ app.get("/fetch", async (req, res) => {
           }
         }
 
-        // Format the manifest content with new lines and indentation
         const formattedManifestContent = manifestContent.replace(/(#EXT[^:]+:)/g, "\n$1").replace(/\n(\n+)/g, "\n");
 
-        //return formattedManifestContent;
         return { 
           type: manifestType, 
           content: formattedManifestContent,
           bandwidth: bandwidth,
-          metadata: metadata
+          metadata: metadata,
+          url: video_uri
         };
       } catch (error) {
-        console.error("Error fetching manifest:", error);
-        process.exit(1);
-        return null;
+        console.error(`Error fetching manifest ${manifestUrl}:`, error.message);
+        return {
+          type: "Error",
+          content: `Failed to fetch manifest: ${error.response?.status || error.message}`,
+          url: manifestUrl,
+          error: true
+        };
       }
     });
 
     const manifests = await Promise.all(fetchPromises);
 
-    res.json({ manifests: manifests });
+    const manifestContentHtml = manifests.map(manifest => {
+      const lineNumbersHtml = Array.from({ length: manifest.content.split('\n').length }, (_, i) => `<div class="line-numbers-row">${i + 1}</div>`).join('');
+      const manifestUrl = manifest.type === "Master Manifest" ? masterUrl : manifest.url;
+      return `
+        <div class="line-numbers">
+          <div class="line-numbers-rows">
+            ${lineNumbersHtml}
+          </div>
+          <div class="line-numbers-content" onmouseup="handleSelection(event)">
+            <pre><code>${manifest.content}</code></pre>
+          </div>
+        </div>
+        <button onclick="topFunction()" id="scrollToTopBtn" title="Go to top">Back to Top</button>
+        <div class="manifest-url">
+          ${manifest.type === "Master Manifest" ? masterUrl : manifestUrl}
+        </div>
+      `;
+    }).join('');
+
+    res.json({ manifests: manifests, manifestContentHtml });
   } catch (error) {
     console.error("Error fetching master manifest:", error);
     res.status(500).json({ error: "Error fetching master manifest" });

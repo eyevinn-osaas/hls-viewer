@@ -550,3 +550,14 @@ body {
   .copy-url-btn:active {
     transform: scale(0.95);
   }
+
+  .manifest-url {
+    margin-top: 20px;
+    padding: 10px;
+    background-color: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    word-break: break-all;
+    font-family: monospace;
+    color: #888;
+  }

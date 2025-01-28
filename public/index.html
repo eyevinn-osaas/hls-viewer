@@ -9,13 +9,13 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script>
     const manifestHistory = [];
-    let MAX_HISTORY = 5; // Default value
-    let ALLOW_DUPLICATES = true; // Changed to true as default
-    let HIGHLIGHT_DIVERGENT = true; // Default value
+    let MAX_HISTORY = 5;
+    let ALLOW_DUPLICATES = true;
+    let HIGHLIGHT_DIVERGENT = true;
     let currentTabType = null;
     let currentTabIndex = null;
 
-    // Move these functions to the top of your script section, before $(document).ready()
+
     function calculateSelectedDuration(selectedText) {
       const extinfRegex = /#EXTINF:([0-9.]+),/g;
       let match;
@@ -61,7 +61,7 @@
         const errorMessage = $("#error-message");
         
         loadingMessage.style.display = "block";
-        errorMessage.hide(); // Hide any previous error
+        errorMessage.hide(); 
         
         try {
           $.get("/fetch", { url: $("#url-input").val() })
@@ -91,9 +91,7 @@
         }
       });
 
-      // Add function to display manifests
       function displayManifests(manifests, url = '') {
-        // If URL is provided, store in history (if not already present)
         if (url) {
           const isDuplicate = manifestHistory.some(entry => entry.url === url);
           
@@ -163,13 +161,11 @@
             ].filter(Boolean).join('');
           };
 
-          // Calculate and append the total duration
           const totalDuration = calculateTotalDuration(manifest.content);
           const segmentCount = calculateSegCount(manifest.content);
           const breakCounts = calculateBreakCounts(manifest.content);
           const sequenceInfo = getMediaSequenceInfo(manifest.content);
 
-          // First, collect all sequences from non-master manifests
           const mediaSequences = [];
           const discSequences = [];
           for (const manifest of manifests) {
@@ -184,9 +180,7 @@
             }
           }
 
-          // Then modify how we display metrics for each manifest type
           if (manifest.type === "Master Manifest") {
-            // First determine the most common sequence numbers
             const mostCommonMediaSeq = mediaSequences.length > 0 
               ? mediaSequences.reduce((a, b) =>
                   mediaSequences.filter(v => v === a).length >= mediaSequences.filter(v => v === b).length ? a : b
@@ -256,7 +250,6 @@
             tabContent.append(metricsHtml);
           }
 
-          // Append the manifest content
           const lines = manifest.content.split('\n');
           const lineNumbersHtml = lines.map((_, i) => `<span class="line-number">${i + 1}</span>`).join('');
 
@@ -269,10 +262,12 @@
                 <pre><code>${manifest.content}</code></pre>
               </div>
             </div>
+            <div class="manifest-url">
+              ${manifest.url || url}
+            </div>
           `;
 
           tabContent.append(manifestContentHtml);
-
           $("#tabs").append(tabLink);
           $("#manifests-container").append(tabContent);
         }
@@ -283,12 +278,10 @@
         });
         loadingMessage.style.display = "none";
 
-        // Update the click handler for tabs
         $(document).on("click", "a", function (event) {
           event.preventDefault();
           const target = $(this).attr("href");
           
-          // Store current tab info
           const tabText = $(this).text();
           if (tabText.includes('[')) {
             const type = tabText.split('[')[0].trim();
@@ -300,21 +293,16 @@
             currentTabIndex = 1;
           }
           
-          // Hide all tabs and remove active class from all links
           $(".tab").hide();
           $("ul li a").removeClass("active");
           
-          // Show selected tab and add active class to clicked link
           $(target).show();
           $(this).addClass("active");
         });
 
-        // Also update the displayManifests function to set initial active state
-        // Add this line after creating the tabs:
         $("ul li a:first").addClass("active");
       }
 
-      // Add function to update history dropdown
       function updateHistoryDropdown() {
         const historyList = $("#history-list");
         const historyTabsContainer = $(".history-tabs-container");
@@ -343,7 +331,6 @@
           `);
           historyList.append(listItem);
 
-          // Add history tab with corrected index numbering
           const historyTab = $(`
             <button class="history-tab ${index === 0 ? 'active' : ''}" 
                     data-index="${index}"
@@ -356,18 +343,15 @@
         });
       }
 
-      // Add click handler for history tabs
       $(document).on("click", ".history-tab", function() {
         const index = $(this).data("index");
         const historyEntry = manifestHistory[index];
         
-        // Update active state of tabs
         $(".history-tab").removeClass("active");
         $(this).addClass("active");
         
         displayManifests(historyEntry.manifests);
         
-        // Find and activate the equivalent playlist tab
         if (currentTabType) {
           let targetTab = null;
           
@@ -399,7 +383,6 @@
         }
       });
 
-      // Toggle history dropdown
       $("#history-toggle").click(function() {
         $("#history-dropdown").toggleClass("show");
       });
@@ -444,7 +427,6 @@
         return c;
       }
 
-      // Add these event listeners outside of document.ready
       document.addEventListener('mousedown', function(event) {
         const tooltip = document.getElementById('selection-tooltip');
         if (tooltip && !event.target.closest('.line-numbers-content')) {
@@ -461,7 +443,6 @@
         }
       });
 
-      // Add these event listeners in your document.ready function
       $("#settings-toggle").click(function() {
         $("#settings-modal").show();
       });
@@ -474,20 +455,17 @@
         const newMaxHistory = parseInt($("#max-history-input").val());
         const newAllowDuplicates = $("#allow-duplicates-input").is(":checked");
         const newHighlightDivergent = $("#highlight-divergent-input").is(":checked");
-        
-        // Validate max history value
+
         if (newMaxHistory >= 1 && newMaxHistory <= 10) {
           MAX_HISTORY = newMaxHistory;
           ALLOW_DUPLICATES = newAllowDuplicates;
           HIGHLIGHT_DIVERGENT = newHighlightDivergent;
-          
-          // Trim history if new max is smaller
+
           while (manifestHistory.length > MAX_HISTORY) {
             manifestHistory.pop();
           }
           
           updateHistoryDropdown();
-          // Refresh current view to apply new highlight setting
           if (manifestHistory.length > 0) {
             displayManifests(manifestHistory[0].manifests);
           }
@@ -495,7 +473,6 @@
         }
       });
 
-      // Add this new function to parse media sequence info
       function getMediaSequenceInfo(manifestContent) {
         const lines = manifestContent.split('\n');
         let mediaSequence = null;
@@ -518,12 +495,10 @@
         return { mediaSequence, discSequence, hasEndlist };
       }
 
-      // Add click handler for copy button
       $(document).on("click", ".copy-url-btn", function(e) {
         e.stopPropagation();
         const url = $(this).data("url");
         navigator.clipboard.writeText(url).then(() => {
-          // Show temporary success state
           const btn = $(this);
           btn.text("✓").css("color", "#4CAF50");
           setTimeout(() => {
