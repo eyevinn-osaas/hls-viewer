@@ -6,7 +6,6 @@ This is a simple and basic browser-based tool for viewing and analyzing HLS (HTT
 
 ![alt text](image-1.png)
 
-
 ## What does it do? 🤔
 
 This tool makes it super easy to inspect HLS stream manifests. Just paste your master manifest URL, and it will fetch and display:
@@ -26,7 +25,6 @@ Each manifest is displayed in a separate tab with helpful metrics like:
 ### Key Features ✨
 
 - **No Installation Required**: Just open index.html in your browser
-- **Clean Interface**: Easy-to-read, syntax-highlighted manifests
 - **History**: Keep track of recently viewed manifests
 - **Smart Selection**: Select segments to see their combined duration
 - **Divergent Sequence Detection**: Highlights mismatched media/discontinuity sequences
