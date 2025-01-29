@@ -221,7 +221,7 @@
               let metadata = null;
 
               if (manifestUrl === url) {
-                type = "Master Manifest";
+                type = "Multivariant";
               } else if (audioUrls.includes(manifestUrl)) {
                 type = "Audio Manifest";
                 const audioMeta = audioInfo.find(info => info.url === manifestUrl);
@@ -352,7 +352,7 @@
           
           $("#tabs li a").each(function() {
             const tabText = $(this).text();
-            if (currentTabType === "Master Manifest") {
+            if (currentTabType === "Multivariant") {
               if (tabText === currentTabType) {
                 targetTab = $(this);
                 return false;
@@ -488,7 +488,7 @@
         const tabLink = $('<li></li>');  // Create empty li first
         const tabContent = $(`<div id="${tabId}" class="tab"></div>`);
 
-        if (manifest.type === "Master Manifest") {
+        if (manifest.type === "Multivariant") {
           manifestName = manifest.type;
           // Create the anchor with the name and tooltip AFTER we know them
           tabLink.html(`<a href="#${tabId}">${manifestName}</a>`);
@@ -497,7 +497,7 @@
           const discSequences = [];
           
           manifests.forEach(m => {
-            if (m.type !== "Master Manifest") {
+            if (m.type !== "Multivariant") {
               const sequenceInfo = getMediaSequenceInfo(m.content);
               if (sequenceInfo.mediaSequence !== null && !sequenceInfo.hasEndlist) {
                 mediaSequences.push(sequenceInfo.mediaSequence);
@@ -597,7 +597,7 @@
         const breakCounts = calculateBreakCounts(manifest.content);
         const sequenceInfo = getMediaSequenceInfo(manifest.content);
 
-        if (manifest.type !== "Master Manifest") {
+        if (manifest.type !== "Multivariant") {
           const metricsHtml = `
             <div class="metrics-container">
               <div class="metric-box">
