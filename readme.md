@@ -1,7 +1,11 @@
-# HLS Manifest Viewer 👀
+# Simple HLS Manifest Viewer 👀
 
 Hello👋
+
 This is a simple and basic browser-based tool for viewing and analyzing HLS (HTTP Live Streaming) playlist manifests. No installation required - just open and use!
+
+![alt text](image-1.png)
+
 
 ## What does it do? 🤔
 
@@ -27,16 +31,6 @@ Each manifest is displayed in a separate tab with helpful metrics like:
 - **Smart Selection**: Select segments to see their combined duration
 - **Divergent Sequence Detection**: Highlights mismatched media/discontinuity sequences
 - **Copy Support**: Easy URL copying and manifest content selection
-
-## When is this useful? 🎯
-
-This tool is particularly helpful when:
-- Debugging HLS stream issues
-- Verifying manifest structure and content
-- Troubleshooting audio/video sync problems
-- Checking ad break positions and durations
-- Validating stream variants
-- Inspecting subtitle/caption manifests
 
 Instead of playing the stream in a video player and digging through browser network requests to find and inspect manifests, you can quickly view everything in one place. No more jumping between multiple network requests or manually calculating segment durations!
 
