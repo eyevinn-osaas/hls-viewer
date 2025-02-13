@@ -1,4 +1,4 @@
-# Simple HLS Manifest Viewer 👀
+# Simple HLS Manifest Viewer v0.1.3 👀
 
 Hello👋
 
