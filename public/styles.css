@@ -575,3 +575,14 @@ body {
   input {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
+
+  .site-footer {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #888;
+    font-size: 12px;
+    border-top-left-radius: 4px;
+  }
