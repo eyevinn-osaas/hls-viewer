@@ -7,8 +7,8 @@
     script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://code.jquery.com https://cdn.jsdelivr.net;
     style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com;
     img-src 'self' blob: data:;
-    media-src 'self' blob: https:;
-    connect-src 'self' https: blob:;
+    media-src 'self' blob: https: *;
+    connect-src 'self' https: blob: *;
     worker-src 'self' blob:;
     font-src 'self' https://fonts.gstatic.com;
   ">
@@ -111,6 +111,7 @@
     let MAX_HISTORY = parseInt(localStorage.getItem('maxHistory') || '5');
     let ALLOW_DUPLICATES = localStorage.getItem('allowDuplicates') !== 'false';
     let HIGHLIGHT_DIVERGENT = localStorage.getItem('highlightDivergent') !== 'false';
+    let ENABLE_PREVIEW_PLAYER = localStorage.getItem('enablePreviewPlayer') !== 'false';
     let currentTabType = null;
     let currentTabIndex = null;
     let hls = null;
@@ -239,8 +240,8 @@
         tooltip.style.top = (event.pageY + 10) + 'px';
       }
       
-      // Only proceed with player creation for Media Manifests
-      if (manifestType !== "Media Manifest") {
+      // Only proceed with player creation if enabled and for Media Manifests
+      if (!ENABLE_PREVIEW_PLAYER || manifestType !== "Media Manifest") {
         return;
       }
 
@@ -254,6 +255,20 @@
 
       // Parse selected segments
       const selectedLines = selectedText.split('\n');
+      // Find the most recent init segment from the full content up to the selection
+      const fullLines = fullContent.split('\n');
+      let lastInitSegment = initSegment;  // Default from earlier search
+      const selectionStart = fullContent.indexOf(selectedText);
+      const contentBeforeSelection = fullContent.substring(0, selectionStart);
+      const initSegments = contentBeforeSelection.match(/#EXT-X-MAP:URI="([^"]+)"/g);
+      if (initSegments && initSegments.length > 0) {
+        // Get the last init segment before our selection
+        const lastInitMatch = initSegments[initSegments.length - 1].match(/URI="([^"]+)"/);
+        if (lastInitMatch) {
+          lastInitSegment = resolveUrl(lastInitMatch[1], manifestUrl);
+        }
+      }
+      
       const segments = [];
       let currentDuration = null;
 
@@ -268,15 +283,16 @@
           
           segments.push({
             duration: currentDuration,
-            uri: resolveUrl(line.trim(), baseUrl),  // Use baseUrl here
-            fullText: context
+            uri: resolveUrl(line.trim(), baseUrl),
+            fullText: context,
+            initSegment: lastInitSegment  // Add the init segment that applies to this segment
           });
           currentDuration = null;
         }
       });
 
       if (segments.length > 0) {
-        createAndPlayTempPlaylist(segments, initSegment);
+        createAndPlayTempPlaylist(segments);
       }
     }
 
@@ -685,12 +701,26 @@
           
           // Stop and hide player
           if (playerContainer && playerContainer.style.display !== 'none') {
-            video.pause();
-            if (hls) {
-              hls.destroy();
-              hls = null;
+            // Handle play/pause more gracefully
+            const cleanup = () => {
+              if (hls) {
+                hls.destroy();
+                hls = null;
+              }
+              playerContainer.style.display = 'none';
+            };
+            
+            // Check if video is actually playing before trying to pause
+            if (!video.paused) {
+              video.pause()
+                .then(cleanup)
+                .catch(() => {
+                  // If pause fails, still cleanup
+                  cleanup();
+                });
+            } else {
+              cleanup();
             }
-            playerContainer.style.display = 'none';
           }
         }
       });
@@ -707,15 +737,18 @@
         const newMaxHistory = parseInt($("#max-history-input").val());
         const newAllowDuplicates = $("#allow-duplicates-input").is(":checked");
         const newHighlightDivergent = $("#highlight-divergent-input").is(":checked");
+        const newEnablePreviewPlayer = $("#enable-preview-player-input").is(":checked");
 
         if (newMaxHistory >= 1 && newMaxHistory <= 10) {
           MAX_HISTORY = newMaxHistory;
           ALLOW_DUPLICATES = newAllowDuplicates;
           HIGHLIGHT_DIVERGENT = newHighlightDivergent;
+          ENABLE_PREVIEW_PLAYER = newEnablePreviewPlayer;
 
           localStorage.setItem('maxHistory', MAX_HISTORY);
           localStorage.setItem('allowDuplicates', ALLOW_DUPLICATES);
           localStorage.setItem('highlightDivergent', HIGHLIGHT_DIVERGENT);
+          localStorage.setItem('enablePreviewPlayer', ENABLE_PREVIEW_PLAYER);
 
           while (manifestHistory.length > MAX_HISTORY) {
             manifestHistory.pop();
@@ -727,6 +760,20 @@
             displayManifests(manifestHistory[0].manifests);
           }
           $("#settings-modal").hide();
+          
+          // If preview player is disabled, clean up any existing player
+          if (!ENABLE_PREVIEW_PLAYER) {
+            const playerContainer = document.getElementById('floating-player');
+            const video = document.getElementById('video');
+            if (playerContainer && playerContainer.style.display !== 'none') {
+              video.pause();
+              if (hls) {
+                hls.destroy();
+                hls = null;
+              }
+              playerContainer.style.display = 'none';
+            }
+          }
         }
       });
 
@@ -776,6 +823,12 @@
 
       // Make sure first tab is active by default
       $("ul li a:first").addClass("active");
+
+      // Load saved settings
+      $("#max-history-input").val(MAX_HISTORY);
+      $("#allow-duplicates-input").prop('checked', ALLOW_DUPLICATES);
+      $("#highlight-divergent-input").prop('checked', HIGHLIGHT_DIVERGENT);
+      $("#enable-preview-player-input").prop('checked', ENABLE_PREVIEW_PLAYER);
     });
 
     function displayManifests(manifests, url = '') {
@@ -964,7 +1017,7 @@
       document.documentElement.scrollTop = 0; // For Chrome, Firefox, IE and Opera
     }
 
-    function createAndPlayTempPlaylist(segments, initSegment) {
+    function createAndPlayTempPlaylist(segments) {
       let playlist = '#EXTM3U\n';
       playlist += '#EXT-X-VERSION:6\n';
       playlist += '#EXT-X-TARGETDURATION:6\n';
@@ -975,14 +1028,10 @@
       
       segments.forEach((segment, index) => {
         const segmentText = segment.fullText || '';
-        const initMatch = segmentText.match(/#EXT-X-MAP:URI="([^"]+)"/);
-        
-        if (initMatch) {
-          currentInitSegment = initMatch[1];
+        // If this segment has a different init segment than current, add it to playlist
+        if (segment.initSegment !== currentInitSegment) {
+          currentInitSegment = segment.initSegment;
           playlist += `#EXT-X-MAP:URI="${currentInitSegment}"\n`;
-        } else if (index === 0 && initSegment) {
-          currentInitSegment = initSegment;
-          playlist += `#EXT-X-MAP:URI="${initSegment}"\n`;
         }
         
         if (index > 0 && segmentText.includes('#EXT-X-DISCONTINUITY')) {
@@ -1112,6 +1161,12 @@
         <label>
           <input type="checkbox" id="highlight-divergent-input" checked>
           Highlight Divergent Sequences
+        </label>
+      </div>
+      <div class="setting-item">
+        <label>
+          <input type="checkbox" id="enable-preview-player-input" checked>
+          Enable Segment Preview Player
         </label>
       </div>
       <div class="setting-item">
