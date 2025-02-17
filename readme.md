@@ -2,8 +2,7 @@
 
 Hello👋
 
-This is a simple and basic browser-based tool for viewing and analyzing HLS (HTTP Live Streaming) playlist manifests. No installation required - just open and use! 
-Try it at: https://nfrederiksen.github.io/simple-hls-manifest-viewer/public/index.html
+This is a simple and basic browser-based tool for viewing and analyzing HLS (HTTP Live Streaming) playlist manifests. No installation required;
 
 ![alt text](image-1.png)
 
