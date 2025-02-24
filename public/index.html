@@ -857,6 +857,13 @@
         
         $(target).show();
         $(this).addClass("active");
+        
+        // Update share button URL to include current tab
+        const shareButton = $("#share-button");
+        if (shareButton.is(":visible")) {
+          const currentUrl = $("#url-input").val();
+          shareButton.off('click').on('click', () => copyShareableUrl(currentUrl));
+        }
       });
 
       // Make sure first tab is active by default
@@ -1147,19 +1154,61 @@
       }
     }
 
-    // Add this function after the other functions in the script section
+    // Update the generateShareableUrl function to include the selected tab info
     function generateShareableUrl(m3u8Url) {
       const baseUrl = window.location.origin + window.location.pathname;
-      return `${baseUrl}?manifest=${encodeURIComponent(m3u8Url)}`;
+      const params = new URLSearchParams();
+      params.set('manifest', m3u8Url);
+      
+      // Add selected tab info if available
+      if (currentTabType) {
+        params.set('tabType', currentTabType);
+        if (currentTabIndex) {
+          params.set('tabIndex', currentTabIndex);
+        }
+      }
+      
+      return `${baseUrl}?${params.toString()}`;
     }
 
-    // Add this function to handle URL parameters when the page loads
+    // Update the handleUrlParams function to handle the tab selection
     function handleUrlParams() {
       const urlParams = new URLSearchParams(window.location.search);
       const manifestUrl = urlParams.get('manifest');
+      const tabType = urlParams.get('tabType');
+      const tabIndex = urlParams.get('tabIndex');
+      
       if (manifestUrl) {
         $("#url-input").val(manifestUrl);
+        
+        // Store the tab info before fetching
+        if (tabType) {
+          currentTabType = tabType;
+          currentTabIndex = tabIndex ? parseInt(tabIndex) : null;
+        }
+        
+        // Add a small delay to ensure the tabs are created before selecting
         $("#fetch-form").submit();
+        
+        if (tabType) {
+          setTimeout(() => {
+            $("#tabs li a").each(function() {
+              const tabText = $(this).text();
+              if (tabType === "Multivariant") {
+                if (tabText === tabType) {
+                  $(this).click();
+                  return false;
+                }
+              } else if (tabText.includes(tabType)) {
+                const thisTabIndex = parseInt(tabText.split('[')[1]) || 1;
+                if (thisTabIndex === parseInt(tabIndex)) {
+                  $(this).click();
+                  return false;
+                }
+              }
+            });
+          }, 500); // Half second delay to ensure content is loaded
+        }
       }
     }
 
@@ -1256,7 +1305,7 @@
     <video id="video"></video>
   </div>
   <footer class="site-footer">
-    <p>HLS Manifest Viewer v0.1.5</p>
+    <p>HLS Manifest Viewer v0.1.6</p>
   </footer>
 </body>
 
