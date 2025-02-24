@@ -35,6 +35,8 @@ Each manifest is displayed in a separate tab with helpful metrics like:
 
 Instead of playing the stream in a video player and digging through browser network requests to find and inspect manifests, you can quickly view everything in one place. No more jumping between multiple network requests or manually calculating segment durations!
 
+![alt text](chrome_EaMDOEBm44.gif)
+
 ## Getting Started 🚀
 
 1. Download or clone this repository
