@@ -417,7 +417,7 @@
 
       $("#fetch-form").on("submit", function (event) {
         event.preventDefault();
-        const url = $("#url-input").val();
+        const url = $("#url-input").val().trim();  // Add trim() to clean the URL
         
         if (!isValidUrl(url)) {
           $("#error-message").text("Please enter a valid HTTP(S) URL").show();
@@ -1178,7 +1178,10 @@
       const tabType = urlParams.get('tabType');
       const tabIndex = urlParams.get('tabIndex');
       
+      console.log('URL Params:', { manifestUrl, tabType, tabIndex }); // Debug log
+      
       if (manifestUrl) {
+        console.log('Setting URL input and submitting form'); // Debug log
         $("#url-input").val(manifestUrl);
         
         // Store the tab info before fetching
@@ -1187,28 +1190,9 @@
           currentTabIndex = tabIndex ? parseInt(tabIndex) : null;
         }
         
-        // Add a small delay to ensure the tabs are created before selecting
-        $("#fetch-form").submit();
-        
-        if (tabType) {
-          setTimeout(() => {
-            $("#tabs li a").each(function() {
-              const tabText = $(this).text();
-              if (tabType === "Multivariant") {
-                if (tabText === tabType) {
-                  $(this).click();
-                  return false;
-                }
-              } else if (tabText.includes(tabType)) {
-                const thisTabIndex = parseInt(tabText.split('[')[1]) || 1;
-                if (thisTabIndex === parseInt(tabIndex)) {
-                  $(this).click();
-                  return false;
-                }
-              }
-            });
-          }, 500); // Half second delay to ensure content is loaded
-        }
+        // IMPORTANT: Changed from $("#fetch-form").submit()
+        // to explicitly trigger the submit handler
+        $("#fetch-form").trigger('submit');
       }
     }
 
