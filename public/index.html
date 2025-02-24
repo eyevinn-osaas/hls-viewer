@@ -412,9 +412,6 @@
     }
 
     $(document).ready(function () {
-      // Add URL parameter handling
-      handleUrlParams();
-
       $("#fetch-form").on("submit", function (event) {
         event.preventDefault();
         const url = $("#url-input").val().trim();  // Add trim() to clean the URL
@@ -874,9 +871,6 @@
       $("#allow-duplicates-input").prop('checked', ALLOW_DUPLICATES);
       $("#highlight-divergent-input").prop('checked', HIGHLIGHT_DIVERGENT);
       $("#enable-preview-player-input").prop('checked', ENABLE_PREVIEW_PLAYER);
-
-      // Move handleUrlParams here, at the end of document.ready
-      handleUrlParams();
     });
 
     function displayManifests(manifests, url = '') {
@@ -1174,29 +1168,35 @@
       return `${baseUrl}?${params.toString()}`;
     }
 
-    // Update the handleUrlParams function to handle the tab selection
+    // Update the handleUrlParams function to properly decode the URL
     function handleUrlParams() {
       console.log('xxx handleUrlParams called', window.location.search); // Debug log
-      const urlParams = new URLSearchParams(window.location.search);
-      const manifestUrl = urlParams.get('manifest');
-      const tabType = urlParams.get('tabType');
-      const tabIndex = urlParams.get('tabIndex');
       
-      console.log('URL Params:', { manifestUrl, tabType, tabIndex }); // Debug log
-      
-      if (manifestUrl) {
-        console.log('Setting URL input and submitting form'); // Debug log
-        $("#url-input").val(manifestUrl);
+      try {
+        const urlParams = new URLSearchParams(decodeURIComponent(window.location.search));
+        const manifestUrl = urlParams.get('manifest');
+        const tabType = urlParams.get('tabType');
+        const tabIndex = urlParams.get('tabIndex');
         
-        // Store the tab info before fetching
-        if (tabType) {
-          currentTabType = tabType;
-          currentTabIndex = tabIndex ? parseInt(tabIndex) : null;
+        console.log('URL Params:', { manifestUrl, tabType, tabIndex }); // Debug log
+        
+        if (manifestUrl) {
+          console.log('Setting URL input and submitting form'); // Debug log
+          $("#url-input").val(manifestUrl);
+          
+          // Store the tab info before fetching
+          if (tabType) {
+            currentTabType = tabType;
+            currentTabIndex = tabIndex ? parseInt(tabIndex) : null;
+          }
+          
+          // Add a small delay to ensure jQuery is fully loaded
+          setTimeout(() => {
+            $("#fetch-form").trigger('submit');
+          }, 100);
         }
-        
-        // IMPORTANT: Changed from $("#fetch-form").submit()
-        // to explicitly trigger the submit handler
-        $("#fetch-form").trigger('submit');
+      } catch (error) {
+        console.error('Error handling URL parameters:', error);
       }
     }
 
