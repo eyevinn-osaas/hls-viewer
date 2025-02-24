@@ -874,6 +874,9 @@
       $("#allow-duplicates-input").prop('checked', ALLOW_DUPLICATES);
       $("#highlight-divergent-input").prop('checked', HIGHLIGHT_DIVERGENT);
       $("#enable-preview-player-input").prop('checked', ENABLE_PREVIEW_PLAYER);
+
+      // Move handleUrlParams here, at the end of document.ready
+      handleUrlParams();
     });
 
     function displayManifests(manifests, url = '') {
