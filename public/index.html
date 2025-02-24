@@ -1173,6 +1173,7 @@
 
     // Update the handleUrlParams function to handle the tab selection
     function handleUrlParams() {
+      console.log('xxx handleUrlParams called', window.location.search); // Debug log
       const urlParams = new URLSearchParams(window.location.search);
       const manifestUrl = urlParams.get('manifest');
       const tabType = urlParams.get('tabType');
