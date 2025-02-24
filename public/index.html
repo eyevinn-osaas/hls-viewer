@@ -105,6 +105,32 @@
       width: 100%;
       height: 100%;
     }
+
+    .form-buttons {
+      display: inline-flex;
+      gap: 8px;
+    }
+
+    /* Modify the existing share-button style */
+    .share-button {
+      margin: 0;  /* Remove margin since it's now in a flex container */
+      padding: 8px 16px;
+      background-color: #3291ff;  /* Changed to match the site's blue theme */
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+
+    .share-button:hover {
+      background-color: #2170d5;  /* Changed to match the site's blue hover state */
+    }
+
+    .share-button:active {
+      transform: scale(0.98);
+    }
   </style>
   <script>
     const manifestHistory = JSON.parse(localStorage.getItem('manifestHistory') || '[]');
@@ -386,6 +412,9 @@
     }
 
     $(document).ready(function () {
+      // Add URL parameter handling
+      handleUrlParams();
+
       $("#fetch-form").on("submit", function (event) {
         event.preventDefault();
         const url = $("#url-input").val();
@@ -412,8 +441,12 @@
       async function fetchManifests(url) {
         const loadingMessage = document.getElementById("loadingMessage");
         const errorMessage = $("#error-message");
+        const shareButton = $("#share-button");
         
         try {
+          // Hide share button while loading
+          shareButton.hide();
+          
           // Fetch master manifest
           const masterResponse = await fetchWithCorsProxy(url);
           const masterManifestContent = await masterResponse.text();
@@ -561,6 +594,10 @@
             }
           }
 
+          // After successful fetch, show and update share button
+          shareButton.show();
+          shareButton.off('click').on('click', () => copyShareableUrl(url));
+          
           // Display the manifests
           displayManifests(manifests, url);
           loadingMessage.style.display = "none";
@@ -569,6 +606,7 @@
           console.error("Error:", error);
           loadingMessage.style.display = "none";
           errorMessage.text(`Error fetching manifests: ${error.message}`).show();
+          shareButton.hide();
         }
       }
 
@@ -1108,6 +1146,36 @@
         return false;
       }
     }
+
+    // Add this function after the other functions in the script section
+    function generateShareableUrl(m3u8Url) {
+      const baseUrl = window.location.origin + window.location.pathname;
+      return `${baseUrl}?manifest=${encodeURIComponent(m3u8Url)}`;
+    }
+
+    // Add this function to handle URL parameters when the page loads
+    function handleUrlParams() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const manifestUrl = urlParams.get('manifest');
+      if (manifestUrl) {
+        $("#url-input").val(manifestUrl);
+        $("#fetch-form").submit();
+      }
+    }
+
+    // Add this function after generateShareableUrl
+    function copyShareableUrl(url) {
+      navigator.clipboard.writeText(generateShareableUrl(url)).then(() => {
+        const shareButton = document.querySelector('.share-button');
+        const originalText = shareButton.textContent;
+        shareButton.textContent = '✓';
+        shareButton.style.backgroundColor = '#2170d5';  /* Changed to match the site's blue hover state */
+        setTimeout(() => {
+          shareButton.textContent = originalText;
+          shareButton.style.backgroundColor = '';
+        }, 2000);
+      });
+    }
   </script>
 </head>
 
@@ -1117,7 +1185,12 @@
     <form id="fetch-form">
       <label for="url-input">HLS Stream URL:</label>
       <input type="text" id="url-input" placeholder="Enter HLS stream URL" required />
-      <button type="submit">View</button>
+      <div class="form-buttons">
+        <button type="submit">View</button>
+        <button type="button" id="share-button" class="share-button" style="display: none" title="Share Link">
+          🔗
+        </button>
+      </div>
     </form>
     <div class="history-container">
       <div class="history-buttons">
@@ -1183,7 +1256,7 @@
     <video id="video"></video>
   </div>
   <footer class="site-footer">
-    <p>HLS Manifest Viewer v0.1.4</p>
+    <p>HLS Manifest Viewer v0.1.5</p>
   </footer>
 </body>
 
