@@ -103,8 +103,8 @@
 
     #floating-player video {
       width: 100%;
-      height: calc(100% - 30px);
-      margin-top: 30px;
+      height: 100%;  /* Changed to use full height */
+      margin-top: 0;  /* Remove top margin */
     }
 
     .form-buttons {
@@ -133,10 +133,10 @@
       transform: scale(0.98);
     }
 
-    /* Add these styles for the player controls */
+    /* Update the player controls styles */
     .player-controls {
       position: absolute;
-      top: 0;
+      bottom: 0;  /* Changed from top to bottom */
       left: 0;
       right: 0;
       background: rgba(0, 0, 0, 0.7);
@@ -145,6 +145,13 @@
       align-items: center;
       gap: 8px;
       z-index: 10;
+      opacity: 0;  /* Start hidden */
+      transition: opacity 0.3s ease;  /* Smooth fade in/out */
+    }
+
+    /* Show controls on hover */
+    #floating-player:hover .player-controls {
+      opacity: 1;
     }
 
     #mute-button, #close-player {
