@@ -1213,6 +1213,12 @@
         }, 2000);
       });
     }
+
+    // Add this right before the closing </script> tag
+    window.addEventListener('DOMContentLoaded', function() {
+      console.log('DOM loaded, handling URL parameters');
+      handleUrlParams();
+    });
   </script>
 </head>
 
