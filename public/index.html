@@ -1238,29 +1238,49 @@
       }
     }
 
-    // Update the generateShareableUrl function to ensure proper encoding
+    // Update the generateShareableUrl function to use a more reliable encoding method
     function generateShareableUrl(m3u8Url) {
       const baseUrl = window.location.origin + window.location.pathname;
-      const shareUrl = `${baseUrl}?manifest=${encodeURIComponent(m3u8Url)}`;
+      // Use btoa for base64 encoding to avoid URL encoding issues
+      const encodedUrl = btoa(m3u8Url);
+      const shareUrl = `${baseUrl}?m=${encodedUrl}`;
       console.log("Generated share URL:", shareUrl);
       return shareUrl;
     }
 
-    // Modify the handleUrlParams function to add debugging and ensure it works properly
+    // Update the handleUrlParams function to handle the base64 encoded parameter
     function handleUrlParams() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const manifestUrl = urlParams.get('manifest');
-      console.log("URL params check - Found manifest:", manifestUrl);
-      
-      if (manifestUrl) {
-        console.log("Setting URL input value to:", manifestUrl);
-        $("#url-input").val(manifestUrl);
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
         
-        // Add a small delay to ensure the DOM is ready
-        setTimeout(() => {
-          console.log("Submitting form to load manifest");
-          $("#fetch-form").submit();
-        }, 100);
+        // Check for both parameter names (for backward compatibility)
+        let manifestUrl = urlParams.get('manifest');
+        const encodedUrl = urlParams.get('m');
+        
+        // If we have an encoded URL, decode it
+        if (encodedUrl) {
+          try {
+            manifestUrl = atob(encodedUrl);
+          } catch (e) {
+            console.error("Error decoding URL parameter:", e);
+          }
+        }
+        
+        console.log("URL params check - Found manifest:", manifestUrl);
+        
+        if (manifestUrl) {
+          console.log("Setting URL input value to:", manifestUrl);
+          $("#url-input").val(manifestUrl);
+          
+          // Use a more reliable method to trigger the form submission
+          setTimeout(() => {
+            console.log("Submitting form to load manifest");
+            const event = new Event('submit', { bubbles: true, cancelable: true });
+            document.getElementById('fetch-form').dispatchEvent(event);
+          }, 500); // Increased timeout for more reliability
+        }
+      } catch (error) {
+        console.error("Error handling URL parameters:", error);
       }
     }
 
