@@ -470,7 +470,7 @@
     }
 
     $(document).ready(function () {
-      // Add URL parameter handling
+      console.log("Document ready, checking URL parameters");
       handleUrlParams();
 
       $("#fetch-form").on("submit", function (event) {
@@ -1238,19 +1238,29 @@
       }
     }
 
-    // Add this function after the other functions in the script section
+    // Update the generateShareableUrl function to ensure proper encoding
     function generateShareableUrl(m3u8Url) {
       const baseUrl = window.location.origin + window.location.pathname;
-      return `${baseUrl}?manifest=${encodeURIComponent(m3u8Url)}`;
+      const shareUrl = `${baseUrl}?manifest=${encodeURIComponent(m3u8Url)}`;
+      console.log("Generated share URL:", shareUrl);
+      return shareUrl;
     }
 
-    // Add this function to handle URL parameters when the page loads
+    // Modify the handleUrlParams function to add debugging and ensure it works properly
     function handleUrlParams() {
       const urlParams = new URLSearchParams(window.location.search);
       const manifestUrl = urlParams.get('manifest');
+      console.log("URL params check - Found manifest:", manifestUrl);
+      
       if (manifestUrl) {
+        console.log("Setting URL input value to:", manifestUrl);
         $("#url-input").val(manifestUrl);
-        $("#fetch-form").submit();
+        
+        // Add a small delay to ensure the DOM is ready
+        setTimeout(() => {
+          console.log("Submitting form to load manifest");
+          $("#fetch-form").submit();
+        }, 100);
       }
     }
 
