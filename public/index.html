@@ -196,6 +196,41 @@
       border-radius: 50%;
       cursor: pointer;
     }
+
+    /* Add styles for the history tabs header */
+    .history-tabs-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-right: 10px;
+    }
+
+    #toggle-history-tabs {
+      background: none;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 2px 6px;
+      box-shadow: none;
+    }
+
+    #toggle-history-tabs:hover {
+      color: #3291ff;
+      background: none;
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* Add a class for the collapsed state */
+    .history-tabs.collapsed .history-tabs-scroll {
+      display: none;
+    }
+
+    .history-tabs.collapsed #toggle-icon {
+      transform: rotate(180deg);
+      display: inline-block;
+    }
   </style>
   <script>
     const manifestHistory = JSON.parse(localStorage.getItem('manifestHistory') || '[]');
@@ -965,6 +1000,20 @@
         }
         playerContainer.style.display = 'none';
       });
+
+      // Add history tabs toggle handler
+      $("#toggle-history-tabs").click(function() {
+        $("#history-tabs").toggleClass("collapsed");
+        // Save the state to localStorage
+        const isCollapsed = $("#history-tabs").hasClass("collapsed");
+        localStorage.setItem('historyTabsCollapsed', isCollapsed);
+      });
+      
+      // Load the saved state
+      const historyTabsCollapsed = localStorage.getItem('historyTabsCollapsed') === 'true';
+      if (historyTabsCollapsed) {
+        $("#history-tabs").addClass("collapsed");
+      }
     });
 
     function displayManifests(manifests, url = '') {
@@ -1376,7 +1425,12 @@
   <div id="loadingMessage" style="display: none">Loading...</div>
   <div id="error-message" class="error-message" style="display: none"></div>
   <div id="history-tabs" class="history-tabs">
-    <div class="history-label">Previously Viewed Manifests</div>
+    <div class="history-tabs-header">
+      <div class="history-label">Previously Viewed Manifests</div>
+      <button id="toggle-history-tabs" title="Show/Hide History Tabs">
+        <span id="toggle-icon">▲</span>
+      </button>
+    </div>
     <div class="history-tabs-scroll">
       <div class="history-tabs-container"></div>
     </div>
@@ -1432,7 +1486,7 @@
     <video id="video"></video>
   </div>
   <footer class="site-footer">
-    <p>HLS Manifest Viewer v0.1.5</p>
+    <p>HLS Manifest Viewer v0.1.6</p>
   </footer>
 </body>
 
