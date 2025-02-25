@@ -103,7 +103,8 @@
 
     #floating-player video {
       width: 100%;
-      height: 100%;
+      height: calc(100% - 30px);
+      margin-top: 30px;
     }
 
     .form-buttons {
@@ -130,6 +131,63 @@
 
     .share-button:active {
       transform: scale(0.98);
+    }
+
+    /* Add these styles for the player controls */
+    .player-controls {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 10;
+    }
+
+    #mute-button, #close-player {
+      background: none;
+      border: none;
+      color: white;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px 5px;
+      box-shadow: none;
+    }
+
+    #mute-button:hover, #close-player:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: none;
+      box-shadow: none;
+    }
+
+    #volume-slider {
+      flex: 1;
+      height: 5px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 5px;
+    }
+
+    #volume-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      background: white;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    #volume-slider::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: white;
+      border-radius: 50%;
+      cursor: pointer;
     }
   </style>
   <script>
@@ -412,9 +470,12 @@
     }
 
     $(document).ready(function () {
+      // Add URL parameter handling
+      handleUrlParams();
+
       $("#fetch-form").on("submit", function (event) {
         event.preventDefault();
-        const url = $("#url-input").val().trim();  // Add trim() to clean the URL
+        const url = $("#url-input").val();
         
         if (!isValidUrl(url)) {
           $("#error-message").text("Please enter a valid HTTP(S) URL").show();
@@ -854,13 +915,6 @@
         
         $(target).show();
         $(this).addClass("active");
-        
-        // Update share button URL to include current tab
-        const shareButton = $("#share-button");
-        if (shareButton.is(":visible")) {
-          const currentUrl = $("#url-input").val();
-          shareButton.off('click').on('click', () => copyShareableUrl(currentUrl));
-        }
       });
 
       // Make sure first tab is active by default
@@ -871,6 +925,39 @@
       $("#allow-duplicates-input").prop('checked', ALLOW_DUPLICATES);
       $("#highlight-divergent-input").prop('checked', HIGHLIGHT_DIVERGENT);
       $("#enable-preview-player-input").prop('checked', ENABLE_PREVIEW_PLAYER);
+
+      // Add volume control handlers
+      $("#mute-button").click(function() {
+        const video = document.getElementById('video');
+        if (video.muted) {
+          video.muted = false;
+          $(this).text('🔊');
+          $("#volume-slider").val(video.volume);
+        } else {
+          video.muted = true;
+          $(this).text('🔇');
+          $("#volume-slider").val(0);
+        }
+      });
+      
+      $("#volume-slider").on('input', function() {
+        const video = document.getElementById('video');
+        const volumeValue = parseFloat($(this).val());
+        video.volume = volumeValue;
+        video.muted = volumeValue === 0;
+        $("#mute-button").text(volumeValue === 0 ? '🔇' : '🔊');
+      });
+      
+      $("#close-player").click(function() {
+        const playerContainer = document.getElementById('floating-player');
+        const video = document.getElementById('video');
+        video.pause();
+        if (hls) {
+          hls.destroy();
+          hls = null;
+        }
+        playerContainer.style.display = 'none';
+      });
     });
 
     function displayManifests(manifests, url = '') {
@@ -1151,52 +1238,19 @@
       }
     }
 
-    // Update the generateShareableUrl function to include the selected tab info
+    // Add this function after the other functions in the script section
     function generateShareableUrl(m3u8Url) {
       const baseUrl = window.location.origin + window.location.pathname;
-      const params = new URLSearchParams();
-      params.set('manifest', m3u8Url);
-      
-      // Add selected tab info if available
-      if (currentTabType) {
-        params.set('tabType', currentTabType);
-        if (currentTabIndex) {
-          params.set('tabIndex', currentTabIndex);
-        }
-      }
-      
-      return `${baseUrl}?${params.toString()}`;
+      return `${baseUrl}?manifest=${encodeURIComponent(m3u8Url)}`;
     }
 
-    // Update the handleUrlParams function to properly decode the URL
+    // Add this function to handle URL parameters when the page loads
     function handleUrlParams() {
-      console.log('xxx handleUrlParams called', window.location.search); // Debug log
-      
-      try {
-        const urlParams = new URLSearchParams(decodeURIComponent(window.location.search));
-        const manifestUrl = urlParams.get('manifest');
-        const tabType = urlParams.get('tabType');
-        const tabIndex = urlParams.get('tabIndex');
-        
-        console.log('URL Params:', { manifestUrl, tabType, tabIndex }); // Debug log
-        
-        if (manifestUrl) {
-          console.log('Setting URL input and submitting form'); // Debug log
-          $("#url-input").val(manifestUrl);
-          
-          // Store the tab info before fetching
-          if (tabType) {
-            currentTabType = tabType;
-            currentTabIndex = tabIndex ? parseInt(tabIndex) : null;
-          }
-          
-          // Add a small delay to ensure jQuery is fully loaded
-          setTimeout(() => {
-            $("#fetch-form").trigger('submit');
-          }, 100);
-        }
-      } catch (error) {
-        console.error('Error handling URL parameters:', error);
+      const urlParams = new URLSearchParams(window.location.search);
+      const manifestUrl = urlParams.get('manifest');
+      if (manifestUrl) {
+        $("#url-input").val(manifestUrl);
+        $("#fetch-form").submit();
       }
     }
 
@@ -1213,12 +1267,6 @@
         }, 2000);
       });
     }
-
-    // Add this right before the closing </script> tag
-    window.addEventListener('DOMContentLoaded', function() {
-      console.log('DOM loaded, handling URL parameters');
-      handleUrlParams();
-    });
   </script>
 </head>
 
@@ -1296,10 +1344,15 @@
   </div>
 
   <div id="floating-player">
+    <div class="player-controls">
+      <button id="mute-button" title="Mute/Unmute">🔊</button>
+      <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="1">
+      <button id="close-player" title="Close Player">✖</button>
+    </div>
     <video id="video"></video>
   </div>
   <footer class="site-footer">
-    <p>HLS Manifest Viewer v0.1.6</p>
+    <p>HLS Manifest Viewer v0.1.5</p>
   </footer>
 </body>
 
