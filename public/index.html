@@ -103,7 +103,133 @@
 
     #floating-player video {
       width: 100%;
-      height: 100%;
+      height: 100%;  /* Changed to use full height */
+      margin-top: 0;  /* Remove top margin */
+    }
+
+    .form-buttons {
+      display: inline-flex;
+      gap: 8px;
+    }
+
+    /* Modify the existing share-button style */
+    .share-button {
+      margin: 0;  /* Remove margin since it's now in a flex container */
+      padding: 8px 16px;
+      background-color: #3291ff;  /* Changed to match the site's blue theme */
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+
+    .share-button:hover {
+      background-color: #2170d5;  /* Changed to match the site's blue hover state */
+    }
+
+    .share-button:active {
+      transform: scale(0.98);
+    }
+
+    /* Update the player controls styles */
+    .player-controls {
+      position: absolute;
+      bottom: 0;  /* Changed from top to bottom */
+      left: 0;
+      right: 0;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 5px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 10;
+      opacity: 0;  /* Start hidden */
+      transition: opacity 0.3s ease;  /* Smooth fade in/out */
+    }
+
+    /* Show controls on hover */
+    #floating-player:hover .player-controls {
+      opacity: 1;
+    }
+
+    #mute-button, #close-player {
+      background: none;
+      border: none;
+      color: white;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px 5px;
+      box-shadow: none;
+    }
+
+    #mute-button:hover, #close-player:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: none;
+      box-shadow: none;
+    }
+
+    #volume-slider {
+      flex: 1;
+      height: 5px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 5px;
+    }
+
+    #volume-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      background: white;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    #volume-slider::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      background: white;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* Add styles for the history tabs header */
+    .history-tabs-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-right: 10px;
+    }
+
+    #toggle-history-tabs {
+      background: none;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 2px 6px;
+      box-shadow: none;
+    }
+
+    #toggle-history-tabs:hover {
+      color: #3291ff;
+      background: none;
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* Add a class for the collapsed state */
+    .history-tabs.collapsed .history-tabs-scroll {
+      display: none;
+    }
+
+    .history-tabs.collapsed #toggle-icon {
+      transform: rotate(180deg);
+      display: inline-block;
     }
   </style>
   <script>
@@ -386,6 +512,9 @@
     }
 
     $(document).ready(function () {
+      console.log("Document ready, checking URL parameters");
+      handleUrlParams();
+
       $("#fetch-form").on("submit", function (event) {
         event.preventDefault();
         const url = $("#url-input").val();
@@ -412,8 +541,12 @@
       async function fetchManifests(url) {
         const loadingMessage = document.getElementById("loadingMessage");
         const errorMessage = $("#error-message");
+        const shareButton = $("#share-button");
         
         try {
+          // Hide share button while loading
+          shareButton.hide();
+          
           // Fetch master manifest
           const masterResponse = await fetchWithCorsProxy(url);
           const masterManifestContent = await masterResponse.text();
@@ -561,6 +694,10 @@
             }
           }
 
+          // After successful fetch, show and update share button
+          shareButton.show();
+          shareButton.off('click').on('click', () => copyShareableUrl(url));
+          
           // Display the manifests
           displayManifests(manifests, url);
           loadingMessage.style.display = "none";
@@ -569,6 +706,7 @@
           console.error("Error:", error);
           loadingMessage.style.display = "none";
           errorMessage.text(`Error fetching manifests: ${error.message}`).show();
+          shareButton.hide();
         }
       }
 
@@ -829,6 +967,53 @@
       $("#allow-duplicates-input").prop('checked', ALLOW_DUPLICATES);
       $("#highlight-divergent-input").prop('checked', HIGHLIGHT_DIVERGENT);
       $("#enable-preview-player-input").prop('checked', ENABLE_PREVIEW_PLAYER);
+
+      // Add volume control handlers
+      $("#mute-button").click(function() {
+        const video = document.getElementById('video');
+        if (video.muted) {
+          video.muted = false;
+          $(this).text('🔊');
+          $("#volume-slider").val(video.volume);
+        } else {
+          video.muted = true;
+          $(this).text('🔇');
+          $("#volume-slider").val(0);
+        }
+      });
+      
+      $("#volume-slider").on('input', function() {
+        const video = document.getElementById('video');
+        const volumeValue = parseFloat($(this).val());
+        video.volume = volumeValue;
+        video.muted = volumeValue === 0;
+        $("#mute-button").text(volumeValue === 0 ? '🔇' : '🔊');
+      });
+      
+      $("#close-player").click(function() {
+        const playerContainer = document.getElementById('floating-player');
+        const video = document.getElementById('video');
+        video.pause();
+        if (hls) {
+          hls.destroy();
+          hls = null;
+        }
+        playerContainer.style.display = 'none';
+      });
+
+      // Add history tabs toggle handler
+      $("#toggle-history-tabs").click(function() {
+        $("#history-tabs").toggleClass("collapsed");
+        // Save the state to localStorage
+        const isCollapsed = $("#history-tabs").hasClass("collapsed");
+        localStorage.setItem('historyTabsCollapsed', isCollapsed);
+      });
+      
+      // Load the saved state
+      const historyTabsCollapsed = localStorage.getItem('historyTabsCollapsed') === 'true';
+      if (historyTabsCollapsed) {
+        $("#history-tabs").addClass("collapsed");
+      }
     });
 
     function displayManifests(manifests, url = '') {
@@ -1010,6 +1195,33 @@
       $("pre code").each(function (i, block) {
         hljs.highlightElement(block);
       });
+
+      // After all tabs are created and added to the DOM
+      if (window.initialTabToSelect) {
+        console.log("Trying to select initial tab:", window.initialTabToSelect);
+        
+        // Find the tab that matches the stored tab parameter
+        let found = false;
+        $("#tabs li a").each(function() {
+          if ($(this).text() === window.initialTabToSelect) {
+            console.log("Found matching tab, selecting it");
+            $(this).click();
+            found = true;
+            return false; // Break the loop
+          }
+        });
+        
+        if (!found) {
+          console.log("No matching tab found, using first tab");
+          $("#tabs li a:first").click();
+        }
+        
+        // Clear the stored tab parameter
+        delete window.initialTabToSelect;
+      } else {
+        // Default behavior - select first tab
+        $("#tabs li a:first").click();
+      }
     }
 
     function topFunction() {
@@ -1108,6 +1320,82 @@
         return false;
       }
     }
+
+    // Update the generateShareableUrl function to include the active tab information
+    function generateShareableUrl(url) {
+      const baseUrl = window.location.origin + window.location.pathname;
+      
+      // Get the currently active tab information
+      let tabInfo = '';
+      const activeTab = $("ul#tabs li a.active");
+      if (activeTab.length > 0) {
+        const tabText = activeTab.text();
+        tabInfo = encodeURIComponent(tabText);
+      }
+      
+      // Use btoa for base64 encoding to avoid URL encoding issues
+      const encodedUrl = btoa(url);
+      const shareUrl = `${baseUrl}?m=${encodedUrl}${tabInfo ? '&tab=' + tabInfo : ''}`;
+      console.log("Generated share URL:", shareUrl);
+      return shareUrl;
+    }
+
+    // Update the handleUrlParams function to handle the tab parameter
+    function handleUrlParams() {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        // Check for both parameter names (for backward compatibility)
+        let manifestUrl = urlParams.get('manifest');
+        const encodedUrl = urlParams.get('m');
+        const tabParam = urlParams.get('tab');
+        
+        // If we have an encoded URL, decode it
+        if (encodedUrl) {
+          try {
+            manifestUrl = atob(encodedUrl);
+          } catch (e) {
+            console.error("Error decoding URL parameter:", e);
+          }
+        }
+        
+        console.log("URL params check - Found manifest:", manifestUrl);
+        console.log("URL params check - Tab parameter:", tabParam);
+        
+        if (manifestUrl) {
+          console.log("Setting URL input value to:", manifestUrl);
+          $("#url-input").val(manifestUrl);
+          
+          // Store the tab parameter for later use after manifests are loaded
+          if (tabParam) {
+            window.initialTabToSelect = decodeURIComponent(tabParam);
+          }
+          
+          // Use a more reliable method to trigger the form submission
+          setTimeout(() => {
+            console.log("Submitting form to load manifest");
+            const event = new Event('submit', { bubbles: true, cancelable: true });
+            document.getElementById('fetch-form').dispatchEvent(event);
+          }, 500); // Increased timeout for more reliability
+        }
+      } catch (error) {
+        console.error("Error handling URL parameters:", error);
+      }
+    }
+
+    // Add this function after generateShareableUrl
+    function copyShareableUrl(url) {
+      navigator.clipboard.writeText(generateShareableUrl(url)).then(() => {
+        const shareButton = document.querySelector('.share-button');
+        const originalText = shareButton.textContent;
+        shareButton.textContent = '✓';
+        shareButton.style.backgroundColor = '#2170d5';  /* Changed to match the site's blue hover state */
+        setTimeout(() => {
+          shareButton.textContent = originalText;
+          shareButton.style.backgroundColor = '';
+        }, 2000);
+      });
+    }
   </script>
 </head>
 
@@ -1117,7 +1405,12 @@
     <form id="fetch-form">
       <label for="url-input">HLS Stream URL:</label>
       <input type="text" id="url-input" placeholder="Enter HLS stream URL" required />
-      <button type="submit">View</button>
+      <div class="form-buttons">
+        <button type="submit">View</button>
+        <button type="button" id="share-button" class="share-button" style="display: none" title="Share Link">
+          🔗
+        </button>
+      </div>
     </form>
     <div class="history-container">
       <div class="history-buttons">
@@ -1132,7 +1425,12 @@
   <div id="loadingMessage" style="display: none">Loading...</div>
   <div id="error-message" class="error-message" style="display: none"></div>
   <div id="history-tabs" class="history-tabs">
-    <div class="history-label">Previously Viewed Manifests</div>
+    <div class="history-tabs-header">
+      <div class="history-label">Previously Viewed Manifests</div>
+      <button id="toggle-history-tabs" title="Show/Hide History Tabs">
+        <span id="toggle-icon">▲</span>
+      </button>
+    </div>
     <div class="history-tabs-scroll">
       <div class="history-tabs-container"></div>
     </div>
@@ -1180,10 +1478,15 @@
   </div>
 
   <div id="floating-player">
+    <div class="player-controls">
+      <button id="mute-button" title="Mute/Unmute">🔊</button>
+      <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="1">
+      <button id="close-player" title="Close Player">✖</button>
+    </div>
     <video id="video"></video>
   </div>
   <footer class="site-footer">
-    <p>HLS Manifest Viewer v0.1.4</p>
+    <p>HLS Manifest Viewer v0.1.6</p>
   </footer>
 </body>
 
